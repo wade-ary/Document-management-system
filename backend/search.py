@@ -245,6 +245,59 @@ class SearchEngine:
 
         return results
 
+    def get_ranked_lists(
+        self,
+        query: str,
+        top_n: int,
+    ) -> Dict[str, List[Tuple[str, int]]]:
+        """
+        Get per-index ranked lists for RRF. Each value is [(file_id, rank), ...]
+        with rank 1-based (1 = best). Keys: "faiss", "tfidf", "bm25".
+        """
+        out: Dict[str, List[Tuple[str, int]]] = {"faiss": [], "tfidf": [], "bm25": []}
+        if not query or not query.strip():
+            return out
+        q = query.strip()
+        top_n = max(1, min(top_n, 500))
+        n_docs = len(self.tfidf_file_ids)
+        if n_docs == 0:
+            return out
+
+        # FAISS: by similarity descending -> rank 1, 2, ...
+        if FAISS_AVAILABLE and self.faiss_index is not None and self.faiss_file_ids:
+            emb = get_embedding(q)
+            if emb is not None:
+                vec = np.array([emb], dtype=np.float32)
+                faiss.normalize_L2(vec)
+                k = min(top_n, self.faiss_index.ntotal)
+                k = max(k, 1)
+                sims, indices = self.faiss_index.search(vec, k)
+                for rank, (idx, sim) in enumerate(zip(indices[0], sims[0]), start=1):
+                    if 0 <= idx < len(self.faiss_file_ids):
+                        fid = self.faiss_file_ids[idx]
+                        out["faiss"].append((fid, rank))
+
+        # TF-IDF: by score descending -> rank 1, 2, ...
+        if self.tfidf_vectorizer is not None and self.tfidf_matrix is not None:
+            q_vec = self.tfidf_vectorizer.transform([q])
+            tfidf_scores = (self.tfidf_matrix @ q_vec.T).toarray().flatten()
+            order = np.argsort(-tfidf_scores)
+            for r, i in enumerate(order[:top_n], start=1):
+                if i < len(self.tfidf_file_ids):
+                    out["tfidf"].append((self.tfidf_file_ids[i], r))
+
+        # BM25: by score descending -> rank 1, 2, ...
+        if self.bm25 is not None:
+            q_tokens = _tokenize_for_bm25(q)
+            if q_tokens:
+                bm25_scores = self.bm25.get_scores(q_tokens)
+                order = np.argsort(-bm25_scores)
+                for r, i in enumerate(order[:top_n], start=1):
+                    if i < len(self.bm25_file_ids):
+                        out["bm25"].append((self.bm25_file_ids[i], r))
+
+        return out
+
     def get_stats(self) -> Dict[str, Any]:
         stats = {
             "faiss_available": FAISS_AVAILABLE and self.faiss_index is not None,
