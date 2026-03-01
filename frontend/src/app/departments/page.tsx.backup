@@ -1,0 +1,868 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { FaUserTie, FaBalanceScale, FaDollarSign, FaShieldAlt, FaInfoCircle, FaExclamationTriangle, FaTimes, FaCog, FaUpload, FaForward, FaReply } from "react-icons/fa";
+import DepartmentUploadModal from "@/components/DepartmentUploadModal";
+
+type Department = "Finance Department" | "Human Resource Department" | "Legal Department" | "Compliance Department";
+
+interface DocInfo {
+  name: string;
+  deadline: string;
+  language: string;
+  source: string;
+  status: "Processed" | "Pending" | "Action Required" | "Uploaded" | "Processing";
+  summary: string;
+  docType: string;
+  relatedDepts: Department[];
+  isRegulatory: boolean;
+  actionableItems: string[];
+  _id?: string;
+  file_id?: string;
+}
+
+interface ExtractionResults {
+  summary: string;
+  actionableItems: string[];
+  tables: string[];
+  signatures: string[];
+  tables_full?: TableFull[];
+}
+
+interface TableFull {
+  page_number?: number;
+  table_id?: string;
+  method?: string;
+  csv_uri?: string;
+  rows?: string[][];
+  bbox?: unknown;
+  csv_rows?: string[][];
+}
+
+// Shape returned by GET /api/documents
+interface BackendDoc {
+  _id?: string;
+  file_id?: string;
+  filename?: string;
+  upload_date?: string | number | Date;
+  language?: string;
+  status?: DocInfo["status"] | string;
+  summary?: string;
+  doc_type?: string;
+  is_regulatory?: boolean;
+  actionable_items?: string[];
+  department?: string;
+}
+
+const departments: Department[] = [
+  "Finance Department",
+  "Human Resource Department",
+  "Legal Department",
+  "Compliance Department",
+];
+
+const departmentIcons: Record<Department, JSX.Element> = {
+  "Finance Department": <FaDollarSign className="text-blue-600" />,
+  "Human Resource Department": <FaUserTie className="text-green-600" />,
+  "Legal Department": <FaBalanceScale className="text-purple-600" />,
+  "Compliance Department": <FaShieldAlt className="text-red-600" />,
+};
+
+export default function DepartmentsPage() {
+  const [selectedDept, setSelectedDept] = useState<Department>(departments[0]);
+  const [selectedDoc, setSelectedDoc] = useState<DocInfo | null>(null);
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [documents, setDocuments] = useState<Record<Department, DocInfo[]>>({
+    "Finance Department": [],
+    "Human Resource Department": [],
+    "Legal Department": [],
+    "Compliance Department": [],
+  });
+  const [extractionResults, setExtractionResults] = useState<ExtractionResults | null>(null);
+  const [isLoadingExtraction, setIsLoadingExtraction] = useState(false);
+  const [activeTab, setActiveTab] = useState<'summary' | 'actionable' | 'extraction' | 'signatures'>('summary');
+  const [showForwardDropdown, setShowForwardDropdown] = useState(false);
+  const [enrichedTables, setEnrichedTables] = useState<TableFull[] | null>(null);
+
+  // CSV/TSV/pipe parser with delimiter detection and basic quote support
+  const parseCSV = (text: string): string[][] => {
+    const lines = text.replace(/\r/g, '').split('\n');
+    const delims: Array<',' | ';' | '\t' | '|'> = [',', ';', '\t', '|'];
+    const parseWith = (d: string, lns: string[]): string[][] => {
+      if (d === ',' || d === ';') {
+        // quoted parser for comma/semicolon
+        const rows: string[][] = [];
+        for (const ln of lns) {
+          const row: string[] = [];
+          let cell = '';
+          let i = 0;
+          let inQuotes = false;
+          while (i < ln.length) {
+            const ch = ln[i];
+            if (inQuotes) {
+              if (ch === '"') {
+                if (i + 1 < ln.length && ln[i + 1] === '"') {
+                  cell += '"';
+                  i += 2;
+                } else {
+                  inQuotes = false;
+                  i++;
+                }
+              } else {
+                cell += ch;
+                i++;
+              }
+            } else {
+              if (ch === '"') { inQuotes = true; i++; }
+              else if (ch === d) { row.push(cell); cell = ''; i++; }
+              else { cell += ch; i++; }
+            }
+          }
+          row.push(cell);
+          rows.push(row.map(c => c.trim()));
+        }
+        // remove potential trailing empty row
+        if (rows.length > 0 && rows[rows.length - 1].every(c => c === '')) rows.pop();
+        return rows;
+      } else {
+        // simple split for tab/pipe
+        const rows = lns.map(ln => ln.split(d).map(c => c.trim()));
+        if (rows.length > 0 && rows[rows.length - 1].every(c => c === '')) rows.pop();
+        return rows;
+      }
+    };
+    const score = (rows: string[][]): number => {
+      if (!rows.length) return 0;
+      const counts = rows.map(r => r.filter(c => c !== '').length);
+      const avg = counts.reduce((a,b)=>a+b,0) / counts.length;
+      const multi = counts.filter(c => c >= 2).length;
+      return avg + multi; // prefer more columns and more multi-cell lines
+    };
+    let bestRows: string[][] = [];
+    let bestScore = -1;
+    for (const d of delims) {
+      const parsed = parseWith(d, lines);
+      const sc = score(parsed);
+      if (sc > bestScore) { bestRows = parsed; bestScore = sc; }
+    }
+    return bestRows;
+  };
+
+  // Utilities for choosing the best table representation and shaping header/body
+  const hasLetters = (s: string) => /[A-Za-z]/.test(s);
+  const isMostlyNumeric = (s: string) => s !== '' && /^(?:[\d\s.,:\-\/()%]+)$/.test(s);
+  const nonEmptyCount = (row: string[]) => row.filter(c => (c || '').trim() !== '').length;
+  const mode = (arr: number[]) => {
+    const freq = new Map<number, number>();
+    for (const n of arr) freq.set(n, (freq.get(n) || 0) + 1);
+    let best = arr[0] || 0, bestC = -1;
+    for (const [k, v] of freq) { if (v > bestC) { best = k; bestC = v; } }
+    return best;
+  };
+  const scoreRows = (rows: string[][]): {score: number; colCount: number} => {
+    if (!rows || rows.length === 0) return { score: 0, colCount: 0 };
+    const lengths = rows.map(r => r.length);
+    const colMode = mode(lengths.filter(l => l >= 2));
+    const multiRows = rows.filter(r => nonEmptyCount(r) >= Math.max(2, colMode)).length;
+    return { score: multiRows * 10 + colMode, colCount: colMode || Math.max(...lengths) };
+  };
+  const dropIndexColumn = (rows: string[][]): string[][] => {
+    if (!rows || rows.length === 0) return rows;
+    const colN = Math.max(...rows.map(r => r.length));
+    if (colN <= 1) return rows;
+    // Gather column 0 stats
+    const col0 = rows.map(r => (r[0] || '').trim());
+    const emptyRatio = col0.filter(c => c === '').length / col0.length;
+    const numericRatio = col0.filter(c => isMostlyNumeric(c)).length / col0.length;
+    const header0 = (rows[0][0] || '').toLowerCase();
+    const looksIndexHeader = header0 === '' || header0.includes('index') || header0.includes('unnamed');
+    if (looksIndexHeader || emptyRatio > 0.5 || numericRatio > 0.8) {
+      return rows.map(r => r.slice(1));
+    }
+    return rows;
+  };
+  const buildTableFrom = (csv: string[][] | undefined, extracted: string[][] | undefined) => {
+    // Clean extracted rows
+    const clean = (val: unknown) => {
+      if (val == null) return '';
+      const s = String(val);
+      return s.replace(/^\s*Page\s*\d+\s*:\s*/i, '').replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    };
+    let extractedRows = (extracted || []).map(r => (Array.isArray(r) ? r.map(clean) : []));
+    extractedRows = extractedRows.filter(r => r.some(c => c && c.length > 0));
+    const isNoisy = (r: string[]) => {
+      const nonEmpty = r.filter(c => c && c.length > 0);
+      const longest = nonEmpty.reduce((m, c) => Math.max(m, c.length), 0);
+      return nonEmpty.length <= 1 && longest > 40;
+    };
+    extractedRows = extractedRows.filter(r => !isNoisy(r));
+
+    const csvRows = (csv || []).map(r => r.map(c => (c ?? '').trim()));
+    const sCsv = scoreRows(csvRows);
+    const sExt = scoreRows(extractedRows);
+    let rows = sCsv.score >= sExt.score ? csvRows : extractedRows;
+    if (!rows || rows.length === 0) return { header: [] as string[], body: [] as string[][] };
+    rows = dropIndexColumn(rows);
+    const colCount = Math.max(...rows.map(r => r.length));
+    // Decide header: take first row if it looks header-like (has letters and not mostly numeric for majority of cells)
+    const first = rows[0] || [];
+    const headerishCells = first.filter(c => c && hasLetters(c) && !isMostlyNumeric(c)).length;
+    const isHeaderish = headerishCells >= Math.ceil(Math.max(2, colCount) / 2);
+    const header = isHeaderish ? first : Array.from({ length: colCount }).map((_, i) => `Column ${i + 1}`);
+    const body = isHeaderish ? rows.slice(1) : rows;
+    return { header, body };
+  };
+
+  // Build a structured table from compact preview strings (pipe-delimited)
+  const buildFromPreviewLines = (lines: string[] | undefined) => {
+    const rows: string[][] = [];
+    if (!lines || lines.length === 0) return { header: [] as string[], body: [] as string[][], colCount: 0 };
+    const cleaned = lines
+      .map(l => (l || '').trim())
+      .filter(l => l !== '' && !/^-{3,}$/.test(l) && !/^Page\s*\d+\s*:?.*/i.test(l));
+    const splitted = cleaned.map(l => l.split('|').map(c => c.trim()).filter(c => c !== ''));
+    const valid = splitted.filter(r => r.length >= 2);
+    if (valid.length === 0) return { header: [], body: [], colCount: 0 };
+    const counts = valid.map(r => r.length);
+    const colMode = mode(counts);
+    const normalized = valid.map(r => {
+      const out = Array.from({ length: colMode }).map((_, i) => r[i] || '');
+      return out;
+    });
+    const headerCand = normalized[0];
+    const nonNumericHead = headerCand.filter(c => c && /[A-Za-z]/.test(c) && !/^(?:[\d\s.,:\-\/()%]+)$/.test(c)).length;
+    const headerIsReal = nonNumericHead >= Math.ceil(Math.max(2, colMode) / 2);
+    const header = headerIsReal ? headerCand : Array.from({ length: colMode }).map((_, i) => `Column ${i + 1}`);
+    const body = headerIsReal ? normalized.slice(1) : normalized;
+    return { header, body, colCount: colMode };
+  };
+
+  // Get best processed rows from a table (CSV preferred), sanitized and with index column dropped
+  const getProcessedRows = (t: TableFull): string[][] => {
+    const clean = (val: unknown) => {
+      if (val == null) return '';
+      const s = String(val);
+      return s.replace(/^\s*Page\s*\d+\s*:\s*/i, '').replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    };
+    let rows: string[][] = [];
+    if (t.csv_rows && t.csv_rows.length) {
+      rows = t.csv_rows.map(r => r.map(c => (c ?? '').trim()));
+    } else if (t.rows && t.rows.length) {
+      rows = t.rows.map(r => (Array.isArray(r) ? r.map(clean) : []));
+    }
+    // drop empty rows
+    rows = rows.filter(r => r.some(c => c && c.length > 0));
+    // drop noisy paragraph-like single cell rows
+    const noisy = (r: string[]) => {
+      const nonEmpty = r.filter(c => c && c.length > 0);
+      const longest = nonEmpty.reduce((m, c) => Math.max(m, c.length), 0);
+      return nonEmpty.length <= 1 && longest > 40;
+    };
+    rows = rows.filter(r => !noisy(r));
+    rows = dropIndexColumn(rows);
+    return rows;
+  };
+
+  // Build a unified table from multiple fragments and optional preview
+  const buildUnifiedTable = (tables: TableFull[] | null, previewLines: string[] | undefined) => {
+    const allCsvLinks: string[] = (tables || []).map(t => t.csv_uri ? `http://127.0.0.1:5000${t.csv_uri}` : '').filter(Boolean) as string[];
+    // 1) Prefer preview when it already forms a good grid
+    const prv = buildFromPreviewLines(previewLines);
+    const previewGood = prv.colCount >= 3 && (prv.body.length >= 2 || prv.header.length >= 3);
+    if (previewGood) return { header: prv.header, body: prv.body, colCount: prv.colCount, csvLinks: allCsvLinks };
+
+    // 2) Otherwise, pick the best single fragment (don’t merge) to avoid column drift
+    const processed = (tables || []).map(t => ({ rows: getProcessedRows(t), csv: t.csv_uri ? `http://127.0.0.1:5000${t.csv_uri}` : '' }));
+    const candidates = processed.filter(p => p.rows && p.rows.length > 0);
+    if (candidates.length === 0) return { header: [], body: [], colCount: 0, csvLinks: [] };
+    const scored = candidates.map(p => ({
+      p,
+      colN: Math.max(...p.rows.map(r => r.length)),
+      bodyLen: p.rows.length,
+    }));
+    scored.sort((a, b) => (b.bodyLen * 10 + b.colN) - (a.bodyLen * 10 + a.colN));
+    const chosen = scored[0];
+    const rows = chosen.p.rows;
+    const colN = Math.max(...rows.map(r => r.length));
+    // header inference
+    const first = rows[0] || [];
+    const headerishCells = first.filter(c => c && /[A-Za-z]/.test(c) && !/^(?:[\d\s.,:\-\/()%]+)$/.test(c)).length;
+    const looksHeader = headerishCells >= Math.ceil(Math.max(2, colN) / 2);
+    let header = looksHeader ? first : Array.from({ length: colN }).map((_, i) => `Column ${i + 1}`);
+    // sensible defaults for known shapes
+    if (!looksHeader && (colN === 4)) header = ['S. No.', 'Team ID', 'Team Name', 'Name of the Team Leader'];
+    if (!looksHeader && (colN === 3)) header = ['Team ID', 'Team Name', 'Team Leader'];
+    const body = looksHeader ? rows.slice(1) : rows;
+    const csvLinks = chosen.p.csv ? [chosen.p.csv] : [];
+    return { header, body, colCount: colN, csvLinks };
+  };
+
+  useEffect(() => {
+    const fetchDocuments = async () => {
+      try {
+  const response = await fetch('http://127.0.0.1:5000/api/documents');
+  const docs: BackendDoc[] = await response.json();
+
+        const organizedDocs: Record<Department, DocInfo[]> = {
+          "Finance Department": [],
+          "Human Resource Department": [],
+          "Legal Department": [],
+          "Compliance Department": [],
+        };
+
+        const possibleSources = [
+          'Admin Office',
+          'Internal Audit',
+          'Public Portal',
+          'Vendor Upload',
+          'Gov eOffice',
+          'HR Intake Desk',
+          'Legal Inbox',
+          'Finance Desk',
+        ];
+
+    docs.forEach((doc) => {
+          const departmentMapping: Record<string, Department> = {
+            "finance": "Finance Department",
+            "hr": "Human Resource Department",
+            "legal": "Legal Department",
+            "engineering": "Legal Department",
+            "procurement": "Legal Department",
+          };
+          const mappedDepartment: Department = departmentMapping[(doc.department || '').toLowerCase() as keyof typeof departmentMapping] || "Finance Department";
+          const docInfo: DocInfo = {
+            name: doc.filename || "Unknown Document",
+      deadline: new Date(doc.upload_date ?? new Date()).toLocaleDateString(),
+            language: doc.language || 'Unknown',
+            source: possibleSources[Math.floor(Math.random() * possibleSources.length)],
+      status: (doc.status as DocInfo["status"]) || 'Uploaded',
+            summary: doc.summary || '',
+            docType: doc.doc_type || 'Document',
+            relatedDepts: [mappedDepartment],
+            isRegulatory: doc.is_regulatory || false,
+            actionableItems: doc.actionable_items || [],
+            _id: doc._id,
+            file_id: doc.file_id,
+          };
+          (organizedDocs[mappedDepartment] as DocInfo[]).push(docInfo);
+        });
+
+        setDocuments(organizedDocs);
+      } catch (error) {
+        console.error('Failed to fetch documents:', error);
+      }
+    };
+    fetchDocuments();
+  }, []);
+
+  const handleDeptClick = (dept: Department) => {
+    setSelectedDept(dept);
+    setIsModalOpen(false);
+  };
+
+  const handleDocClick = (doc: DocInfo) => {
+    setSelectedDoc(doc);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedDoc(null);
+    setExtractionResults(null);
+    setActiveTab('summary');
+    setShowForwardDropdown(false);
+  };
+
+  const handleForwardDocument = (toDepartment: Department) => {
+    alert(`Document "${selectedDoc?.name}" forwarded to ${toDepartment}`);
+    setShowForwardDropdown(false);
+  };
+
+  const handleReplyToAdmin = () => {
+    alert(`Opening reply interface for document "${selectedDoc?.name}"`);
+  };
+
+  const getForwardDepartments = (): Department[] => {
+    const currentDept = selectedDoc?.relatedDepts?.[0] || selectedDept;
+    return departments.filter(dept => dept !== currentDept);
+  };
+
+  const handleUploadSuccess = (newDocument: DocInfo) => {
+    setDocuments(prevDocs => ({
+      ...prevDocs,
+      [selectedDept]: [newDocument, ...prevDocs[selectedDept]],
+    }));
+  };
+
+  const startExtraction = async (docName: string) => {
+    const doc = documents[selectedDept].find(d => d.name === docName);
+    if (!doc || !doc._id) return;
+
+    setDocuments(prevDocs => {
+      const newDocs = { ...prevDocs };
+      const foundDoc = newDocs[selectedDept].find(d => d.name === docName);
+      if (foundDoc) foundDoc.status = "Processing";
+      return newDocs;
+    });
+
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/documents/${doc._id}/extractions`);
+      const extractionData: { summary?: string; actionable_items?: string[] } = await response.json();
+      setDocuments(prevDocs => {
+        const newDocs = { ...prevDocs };
+        const foundDoc = newDocs[selectedDept].find(d => d.name === docName);
+        if (foundDoc) {
+          foundDoc.status = "Processed";
+          foundDoc.summary = extractionData.summary || "Extraction completed.";
+          foundDoc.actionableItems = extractionData.actionable_items || [];
+        }
+        return newDocs;
+      });
+    } catch (error) {
+      console.error("Extraction failed:", error);
+      setDocuments(prevDocs => {
+        const newDocs = { ...prevDocs };
+        const foundDoc = newDocs[selectedDept].find(d => d.name === docName);
+        if (foundDoc) foundDoc.status = "Action Required";
+        return newDocs;
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (isModalOpen && selectedDoc && selectedDoc._id) {
+      setIsLoadingExtraction(true);
+      fetch(`http://127.0.0.1:5000/api/documents/${selectedDoc._id}/extractions`)
+        .then(res => res.json())
+        .then(data => {
+          setExtractionResults({
+            summary: data.summary || "No summary available.",
+            actionableItems: data.actionable_items || data.actionableItems || [],
+            tables: data.tables || [],
+            signatures: data.signatures || [],
+            tables_full: data.tables_full || [],
+          });
+          // Preload CSVs for precise table rendering when available
+          const tf: TableFull[] = data.tables_full || [];
+          if (tf.length > 0) {
+            Promise.all(
+              tf.map(async (t: TableFull) => {
+                if (!t.csv_uri) return t;
+                try {
+                  const res = await fetch(`http://127.0.0.1:5000${t.csv_uri}`);
+                  const txt = await res.text();
+                  return { ...t, csv_rows: parseCSV(txt) } as TableFull;
+                } catch {
+                  return t;
+                }
+              })
+            ).then((enriched) => setEnrichedTables(enriched)).catch(() => setEnrichedTables(tf));
+          } else {
+            setEnrichedTables(null);
+          }
+        })
+        .catch(() => {
+          setExtractionResults({ summary: "Failed to load extraction results.", actionableItems: [], tables: [], signatures: [], tables_full: [] });
+        })
+        .finally(() => setIsLoadingExtraction(false));
+    } else {
+      setExtractionResults(null);
+  setEnrichedTables(null);
+    }
+  }, [isModalOpen, selectedDoc]);
+
+  return (
+    <div className="flex min-h-screen pt-20 bg-gradient-to-br from-blue-50 to-purple-50">
+      {/* Sidebar */}
+      <aside className="w-72 bg-white/80 border-r border-gray-200 p-6 flex flex-col shadow-lg rounded-r-3xl transition-all duration-300">
+        <h2 className="text-xl font-extrabold mb-6 text-blue-700 tracking-wide">Departments</h2>
+        <ul className="space-y-2">
+          {departments.map((dept) => (
+            <li key={dept}>
+              <button
+                className={`flex items-center w-full text-left px-4 py-3 rounded-xl transition-all duration-200 text-base font-medium shadow-sm hover:scale-[1.03] hover:bg-blue-100/60 focus:outline-none focus:ring-2 focus:ring-blue-300 ${selectedDept === dept ? "bg-blue-600 text-white scale-[1.04] font-bold shadow-md" : "text-gray-700"}`}
+                onClick={() => handleDeptClick(dept)}
+              >
+                {React.cloneElement(departmentIcons[dept], { className: `text-xl mr-3 ${selectedDept === dept ? 'text-white' : departmentIcons[dept].props.className.split(' ').find((c: string) => c.startsWith('text-'))}` })}
+                {dept}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </aside>
+      {/* Main Content */}
+      <main className="flex-1 p-10">
+        <div className="max-w-7xl mx-auto w-full">
+          {/* Header Section */}
+          <div className="flex justify-between items-center mb-8">
+            <div className="flex items-center gap-4">
+              {React.cloneElement(departmentIcons[selectedDept], { className: "text-3xl" })}
+              <h1 className="text-3xl font-extrabold text-gray-800 tracking-tight">{selectedDept}</h1>
+            </div>
+            <button onClick={() => setIsUploadModalOpen(true)} className="bg-gradient-to-r from-blue-500 to-purple-500 text-white px-6 py-2 rounded-xl shadow hover:from-blue-600 hover:to-purple-600 transition-all font-semibold flex items-center gap-2">
+              <FaUpload />
+              <span>Upload Document</span>
+            </button>
+          </div>
+
+          {/* Documents Section */}
+          <div className="bg-white/90 rounded-2xl shadow-lg border border-gray-100 p-6">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Documents</h2>
+            {/* Column Headers */}
+            <div className="hidden md:flex items-center px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-100 mb-2">
+              <div className="flex-1">Document</div>
+              <div className="w-40">Deadline</div>
+              <div className="w-40">Language</div>
+              <div className="w-48">Source</div>
+              <div className="w-32">Status</div>
+            </div>
+            <div className="space-y-4">
+              {documents[selectedDept].map((doc: DocInfo, idx: number) => (
+                <div key={idx} className="bg-gray-50 rounded-xl p-4 transition-all duration-200 hover:shadow-md hover:bg-white flex items-center">
+                  <div className="flex-1 font-semibold text-blue-800 cursor-pointer" onClick={() => handleDocClick(doc)}>{doc.name}</div>
+                  <div className="w-40 text-sm text-gray-700">{doc.deadline}</div>
+                  <div className="w-40 text-sm text-gray-700">{doc.language}</div>
+                  <div className="w-48 text-sm text-gray-700">{doc.source}</div>
+                  <div className="w-32 flex items-center">
+                    {doc.status === "Processing" ? (
+                      <FaCog className="animate-spin text-blue-500 mr-2" />
+                    ) : (
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        doc.status === "Processed" ? "bg-green-100 text-green-700" : 
+                        doc.status === "Pending" ? "bg-yellow-100 text-yellow-700" : 
+                        doc.status === "Uploaded" ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"
+                      }`}>
+                        {doc.status}
+                      </span>
+                    )}
+                  </div>
+                  {doc.isRegulatory && <FaExclamationTriangle className="text-red-500 mx-4" title="Regulatory Document"/>}
+                  
+                  {doc.status === "Uploaded" || doc.status === "Pending" ? (
+                    <button 
+                      onClick={() => startExtraction(doc.name)}
+                      className="ml-4 bg-green-500 text-white px-4 py-1.5 rounded-lg text-xs font-semibold hover:bg-green-600 transition-all"
+                    >
+                      Extract
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <DepartmentUploadModal isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)} department={selectedDept} onUploadSuccess={handleUploadSuccess} />
+
+      {/* Enhanced Modal for Document Details with PDF Viewer */}
+      {isModalOpen && selectedDoc && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" 
+          onClick={() => {
+            closeModal();
+            setShowForwardDropdown(false);
+          }}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-7xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-6 border-b">
+              <h2 className="text-2xl font-bold text-gray-800">{selectedDoc.name}</h2>
+              <button onClick={closeModal} className="p-2 rounded-full hover:bg-gray-200">
+                <FaTimes className="text-gray-600"/>
+              </button>
+            </div>
+            
+            {/* Modal Content - Two Columns */}
+            <div className="flex flex-1 overflow-hidden">
+              {/* Left Column - PDF Viewer */}
+              <div className="w-1/2 bg-gray-100 border-r flex flex-col min-h-[600px]">
+                <div className="p-4 border-b bg-gray-50">
+                  <h3 className="font-semibold text-gray-700">Document Preview</h3>
+                </div>
+                <div className="flex-1 p-4 overflow-auto">
+          {selectedDoc?.file_id ? (
+                    <iframe
+            src={`http://127.0.0.1:5000/api/objects/${selectedDoc.file_id}`}
+                      className="w-full h-full min-h-[600px] border rounded-lg"
+                      title="Document Preview"
+                      onLoad={() => console.log('PDF iframe loaded successfully')}
+                      onError={() => console.log('PDF iframe failed to load')}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full">
+                      <div className="text-center text-gray-500">
+                        <p>Document preview not available</p>
+                        <p className="text-sm mt-2">File ID: {selectedDoc?.file_id || 'Not found'}</p>
+                        <p className="text-sm">Document ID: {selectedDoc?._id || 'Not found'}</p>
+                        <p className="text-sm">Available keys: {Object.keys(selectedDoc || {}).join(', ')}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* Right Column - Interactive Extraction Results */}
+              <div className="w-1/2 flex flex-col relative min-h-[600px]">
+                {/* Tab Buttons */}
+                <div className="p-4 border-b bg-gray-50">
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => setActiveTab('summary')}
+                      className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                        activeTab === 'summary' 
+                          ? 'bg-blue-600 text-white shadow-md' 
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      <FaInfoCircle className="inline mr-2" />
+                      Summary
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('actionable')}
+                      className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                        activeTab === 'actionable' 
+                          ? 'bg-blue-600 text-white shadow-md' 
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      <FaExclamationTriangle className="inline mr-2" />
+                      Actions
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('extraction')}
+                      className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                        activeTab === 'extraction' 
+                          ? 'bg-blue-600 text-white shadow-md' 
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      <FaCog className="inline mr-2" />
+                      Tables
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('signatures')}
+                      className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                        activeTab === 'signatures' 
+                          ? 'bg-blue-600 text-white shadow-md' 
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      ✍️ Signatures
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Tab Content */}
+                <div className="flex-1 p-6 overflow-y-auto min-h-[600px]">
+                  {isLoadingExtraction ? (
+                    <div className="text-center text-blue-600 font-semibold">Loading extraction results...</div>
+                  ) : extractionResults ? (
+                    <>
+                      {/* Summary Tab */}
+                      {activeTab === 'summary' && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-bold text-gray-800 mb-4">Document Summary</h3>
+                          <div className="bg-blue-50 p-4 rounded-lg border-l-4 border-blue-500">
+                            <p className="text-gray-700 leading-relaxed">{extractionResults.summary}</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Actionable Items Tab */}
+                      {activeTab === 'actionable' && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-bold text-gray-800 mb-4">Actionable Items</h3>
+                          {extractionResults.actionableItems && extractionResults.actionableItems.length > 0 ? (
+                            <div className="space-y-3">
+                              {extractionResults.actionableItems.map((item, i) => (
+                                <div key={i} className="bg-yellow-50 p-4 rounded-lg border-l-4 border-yellow-500">
+                                  <div className="flex items-start gap-3">
+                                    <div className="w-6 h-6 bg-yellow-500 text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 mt-0.5">
+                                      {i + 1}
+                                    </div>
+                                    <p className="text-gray-800 leading-relaxed">{item}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-center text-gray-500 py-8">
+                              <FaExclamationTriangle className="mx-auto text-4xl mb-4 text-gray-300" />
+                              <p>No actionable items found in this document.</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Extraction Results Tab */}
+                      {activeTab === 'extraction' && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-bold text-gray-800">Table Extraction</h3>
+                          {(() => {
+                            const unified = buildUnifiedTable(enrichedTables, extractionResults.tables);
+                            if (unified.colCount > 0 && (unified.body.length > 0 || unified.header.length > 0)) {
+                              return (
+                                <div className="space-y-4">
+                                  <div className="flex items-center justify-between">
+                                    <div className="text-sm font-semibold text-gray-800">Table</div>
+                                    {unified.csvLinks && unified.csvLinks.length > 0 && (
+                                      <div className="flex flex-wrap items-center gap-3">
+                                        {unified.csvLinks.map((link, i) => (
+                                          <a key={`csv-link-${i}`} href={link} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm">
+                                            Download CSV{unified.csvLinks.length > 1 ? ` (Part ${i + 1})` : ''}
+                                          </a>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="bg-white border rounded-lg overflow-auto max-h-96">
+                                    <div className="min-w-max">
+                                      <table className="border-collapse w-full">
+                                        {unified.header.length > 0 && (
+                                          <thead className="bg-gray-100 sticky top-0">
+                                            <tr>
+                                              {Array.from({ length: unified.colCount }).map((_, c) => (
+                                                <th key={c} className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                                                  <span className="inline-block break-words" title={unified.header[c] || `Column ${c + 1}`}>{unified.header[c] || `Column ${c + 1}`}</span>
+                                                </th>
+                                              ))}
+                                            </tr>
+                                          </thead>
+                                        )}
+                                        <tbody>
+                                          {unified.body.map((r, rIdx) => (
+                                            <tr key={rIdx} className={rIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                              {Array.from({ length: unified.colCount }).map((_, c) => (
+                                                <td key={c} className="px-3 py-2 text-sm text-gray-800 align-top border-b border-gray-100">
+                                                  <span className="inline-block break-words" title={(r && r[c]) || ''}>{(r && r[c]) || ''}</span>
+                                                </td>
+                                              ))}
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                          {!(() => { const u = buildUnifiedTable(enrichedTables, extractionResults.tables); return u.colCount > 0 && (u.body.length > 0 || u.header.length > 0); })() && extractionResults.tables && extractionResults.tables.length > 0 ? (
+                            <div className="bg-white border rounded-lg overflow-hidden">
+                              <div className="max-h-96 overflow-auto">
+                                <table className="w-full border-collapse">
+                                  <tbody>
+                                    {extractionResults.tables.map((tableLine, idx) => (
+                                      <tr key={idx} className={idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
+                                        <td className="px-4 py-2 border-b text-sm">
+                                          {tableLine.includes('|') ? (
+                                            <div className="font-mono">
+                                              {tableLine.split('|').map((cell, cellIdx) => (
+                                                <span key={cellIdx} className="inline-block w-40 px-2 truncate border-r border-gray-200 last:border-r-0 align-top" title={cell.trim()}>
+                                                  {cell.trim()}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          ) : tableLine.includes('-') && tableLine.length > 20 ? (
+                                            <hr className="border-gray-300" />
+                                          ) : (
+                                            <span className="text-gray-800">{tableLine}</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-center text-gray-500 py-8">
+                              <FaCog className="mx-auto text-4xl mb-4 text-gray-300" />
+                              <p>No tables extracted from this document.</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Signatures Tab */}
+                      {activeTab === 'signatures' && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-bold text-gray-800 mb-4">Signature Detection</h3>
+                          {extractionResults.signatures && extractionResults.signatures.length > 0 ? (
+                            <div className="space-y-3">
+                              {extractionResults.signatures.map((sig, idx) => (
+                                <div key={idx} className="bg-green-50 p-4 rounded-lg border-l-4 border-green-500">
+                                  <pre className="text-sm text-gray-800 overflow-x-auto">{sig}</pre>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-center text-gray-500 py-8">
+                              <div className="text-4xl mb-4">✍️</div>
+                              <p>No signatures detected in this document.</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-center text-gray-400 py-8">
+                      <p>No extraction data available.</p>
+                      <p className="text-sm mt-2">Debug info:</p>
+                      <p className="text-sm">Document ID = {selectedDoc?._id || 'UNDEFINED'}</p>
+                      <p className="text-sm">Document name = {selectedDoc?.name || 'UNDEFINED'}</p>
+                      <p className="text-sm">Document status = {selectedDoc?.status || 'UNDEFINED'}</p>
+                      <p className="text-sm">Document department = {selectedDoc?.relatedDepts?.[0] || 'UNDEFINED'}</p>
+                    </div>
+                  )}
+                </div>
+                {/* Action Buttons - Bottom Right Corner */}
+                <div className="absolute bottom-6 right-6 flex items-center gap-3">
+                  {/* Forward Button with Dropdown */}
+                  <div className="relative">
+                    <button 
+                      onClick={() => setShowForwardDropdown(!showForwardDropdown)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg"
+                    >
+                      <FaForward className="text-sm" />
+                      Forward
+                    </button>
+                    {/* Forward Dropdown */}
+                    {showForwardDropdown && (
+                      <div className="absolute bottom-12 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-48">
+                        <div className="p-2">
+                          <div className="text-sm text-gray-600 font-medium mb-2 px-2">Forward to Department:</div>
+                          {getForwardDepartments().map((dept) => (
+                            <button
+                              key={dept}
+                              onClick={() => handleForwardDocument(dept)}
+                              className="w-full text-left px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700"
+                            >
+                              {dept}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Reply to Admin Button */}
+                  <button 
+                    onClick={handleReplyToAdmin}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-lg"
+                  >
+                    <FaReply className="text-sm" />
+                    Reply to Admin
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

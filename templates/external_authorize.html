@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authorize Application</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="flex items-center justify-center min-h-screen">
+        <div class="bg-white rounded-lg shadow-lg p-8 max-w-lg w-full">
+            <h1 class="text-2xl font-bold text-center text-gray-800 mb-6">Sign in with <span class="text-blue-600">TransformoDoc</span></h1>
+
+            {% if error %}
+                <div class="bg-red-100 text-red-600 px-4 py-2 rounded mb-4 text-sm">
+                    {{ error }}
+                </div>
+            {% endif %}
+
+            <form method="post" class="space-y-4">
+                <input type="hidden" name="state" value="{{ state }}">
+
+                <div>
+                    <label for="username" class="block text-gray-700 font-medium">Username</label>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        name="username" 
+                        required 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        placeholder="Enter your username">
+                </div>
+
+                <div>
+                    <label for="email" class="block text-gray-700 font-medium">Email</label>
+                    <input 
+                        type="email" 
+                        id="email" 
+                        name="email" 
+                        required 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        placeholder="Enter your email">
+                </div>
+
+                <button 
+                    type="submit" 
+                    class="w-full bg-blue-600 text-white font-medium py-2 rounded-lg hover:bg-blue-700 transition">
+                    Authorize
+                </button>
+            </form>
+
+            <p class="text-gray-600 text-center mt-6">
+                You are authorizing the application <strong class="text-gray-800">{{ client.company_name }}</strong> to access your TransformoDoc account.
+            </p>
+
+            <p class="text-gray-500 text-sm text-center mt-4">
+                By authorizing, you agree to our <a href="#" class="text-blue-600 hover:underline">Terms of Service</a> and <a href="#" class="text-blue-600 hover:underline">Privacy Policy</a>.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

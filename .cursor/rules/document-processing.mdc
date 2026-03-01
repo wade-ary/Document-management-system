@@ -1,0 +1,73 @@
+---
+description: "Document processing workflows and AI integration for KMRL system"
+---
+
+# Document Processing Workflows
+
+## Document Lifecycle for KMRL Operations
+
+### 1. Ingestion Stage
+**Supported Formats**: PDF, DOCX, images (PNG, JPG), plain text
+**Sources**: Email attachments, Maximo exports, SharePoint, WhatsApp PDFs, scanned documents
+
+**Processing Pipeline**:
+- Format detection and validation
+- Text extraction with OCR for images
+- Bilingual content recognition (English/Malayalam)
+- Metadata extraction (creation date, author, etc.)
+
+### 2. Analysis Stage
+**AI Processing Components**:
+- **Document Classification**: Categorize by type (engineering drawings, maintenance cards, regulatory bulletins)
+- **Key Information Extraction**: Parse structured data (invoice amounts, dates, reference numbers)
+- **Entity Recognition**: Identify personnel names, equipment IDs, station references
+- **Content Summarization**: Generate executive summaries for lengthy documents
+
+### 3. Routing & Distribution
+**Smart Routing Logic**:
+- **Department Mapping**: Route based on content analysis
+  - Engineering drawings → Rolling-stock Engineers
+  - Safety bulletins → Station Controllers
+  - Vendor invoices → Finance Officers
+  - Policy updates → HR Teams
+- **Priority Classification**: Flag urgent/time-sensitive documents
+- **Compliance Tagging**: Mark regulatory documents for tracking
+
+### 4. Search & Discovery
+**Multi-modal Search**:
+- **Text Search**: Full-text search across extracted content
+- **Semantic Search**: Vector-based similarity matching
+- **Metadata Filters**: Department, date range, document type
+- **Visual Search**: Image content recognition for technical drawings
+
+## AI Model Integration
+
+### Language Models
+- **OpenAI GPT**: Document summarization and analysis
+- **spaCy**: Named entity recognition and text processing
+- **Custom Embeddings**: Domain-specific document similarity
+
+### Performance Optimizations
+- **Lazy Loading**: Models load only when needed ([backend/lazy_nlp.py](mdc:backend/lazy_nlp.py))
+- **Caching**: Store processed results to avoid re-computation
+- **Batch Processing**: Handle multiple documents efficiently
+
+## Compliance & Security
+
+### Regulatory Requirements
+- **Commissioner of Metro Rail Safety**: Bulletin tracking and compliance monitoring
+- **Ministry of Housing & Urban Affairs**: Policy document management
+- **Audit Trails**: Complete document access and modification history
+
+### Data Protection
+- **PII Redaction**: Automatic removal of sensitive personal information
+- **Access Controls**: Role-based document visibility
+- **Retention Policies**: Automated archival based on document age/type
+
+## Integration Points
+
+### External Systems
+- **Maximo**: Maintenance work order integration
+- **SharePoint**: Document repository synchronization
+- **Email Systems**: Automatic document ingestion from attachments
+- **IoT/UNS**: Future integration with sensor data and condition monitoring

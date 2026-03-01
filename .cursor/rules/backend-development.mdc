@@ -1,0 +1,45 @@
+---
+globs: backend/**/*.py,*.py
+description: "Backend development guidelines for KMRL document management system"
+---
+
+# Backend Development Guidelines
+
+## Architecture Principles
+- **Lazy Loading**: Heavy AI models load only when needed ([backend/lazy_nlp.py](mdc:backend/lazy_nlp.py))
+- **Modular Design**: Separate concerns for different document processing stages
+- **API-First**: RESTful endpoints for all document operations
+
+## Key Backend Modules
+
+### Document Processing Pipeline
+- **[backend/new_extract.py](mdc:backend/new_extract.py)**: Text extraction from PDFs, DOCX, images
+- **[backend/main.py](mdc:backend/main.py)**: Document analysis and destination routing
+- **[backend/storage.py](mdc:backend/storage.py)**: File management and MongoDB operations
+- **[backend/redaction.py](mdc:backend/redaction.py)**: PII removal for compliance
+
+### AI & ML Components
+- **spaCy Models**: Use lazy loading pattern for NLP processing
+- **OpenAI Integration**: Document summarization and analysis
+- **Embedding Generation**: For semantic search capabilities
+- **multilingual Support**: Handle English and Malayalam content
+
+### Data Management
+- **MongoDB Collections**:
+  - `metadata`: Document metadata and analysis results
+  - `actions`: User actions requiring admin approval
+  - `directories`: Folder structure and permissions
+  - `users`: User management and department mapping
+
+### Security & Compliance
+- **Role-based Access**: Department-specific document visibility
+- **Approval Workflows**: Admin review for sensitive operations
+- **Audit Trails**: Track all document operations
+- **PII Redaction**: Automatic sensitive data removal
+
+## Development Guidelines
+1. **Error Handling**: Always include try-catch blocks for file operations
+2. **Logging**: Use structured logging for debugging document processing
+3. **Performance**: Implement caching for frequently accessed documents
+4. **Testing**: Mock external API calls (OpenAI, etc.) in tests
+5. **Environment**: Use environment variables for API keys and configuration

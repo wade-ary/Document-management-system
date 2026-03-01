@@ -1,0 +1,135 @@
+---
+description: "Development environment setup and deployment guidelines"
+---
+
+# Development Environment Setup
+
+## Project Structure
+```
+SIH2025-25080/
+├── app.py                 # Main Flask application
+├── backend/              # Backend modules
+│   ├── db.py            # MongoDB connection
+│   ├── new_extract.py   # Document processing
+│   ├── lazy_nlp.py      # Performance optimization
+│   └── ...
+├── frontend/            # Next.js application
+│   ├── src/config/api.ts # API configuration
+│   └── ...
+├── start_dev.py         # Fast development startup
+└── update_api_urls.py   # URL migration script
+```
+
+## Backend Setup
+
+### Poetry Environment
+```bash
+# Activate Poetry environment
+poetry env activate
+source /Users/aryanrajpurkar/Library/Caches/pypoetry/virtualenvs/sih2025-25080-Nf_44v4c-py3.11/bin/activate
+
+# Install dependencies
+poetry install --no-root
+
+# Install additional packages if needed
+poetry run pip install pymongo
+```
+
+### Fast Development Mode
+Use [start_dev.py](mdc:start_dev.py) for faster startup during development:
+```bash
+poetry run python start_dev.py
+```
+
+This script:
+- Sets `DEVELOPMENT_MODE=true` for lazy loading
+- Runs on port 5001 with debug mode
+- Skips heavy AI model loading until needed
+
+### Environment Variables
+Required environment variables:
+```bash
+MONGO_URI=mongodb://localhost:27017
+OPENAI_API_KEY=your_openai_key
+SENDGRID_API_KEY=your_sendgrid_key
+CLERK_AUTH_TOKEN=your_clerk_token
+GEMINI_API_KEY=your_gemini_key
+DEVELOPMENT_MODE=true
+```
+
+## Frontend Setup
+
+### Next.js Configuration
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### API Configuration
+All API endpoints centralized in [frontend/src/config/api.ts](mdc:frontend/src/config/api.ts):
+```typescript
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:5001";
+```
+
+Set environment variables in `frontend/.env.local`:
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:5001
+NEXT_PUBLIC_EXTERNAL_API_BASE_URL=http://localhost:5000
+```
+
+## Performance Optimizations
+
+### Backend Performance
+- **Lazy Loading**: AI models load only when needed ([backend/lazy_nlp.py](mdc:backend/lazy_nlp.py))
+- **Database Connections**: Lazy initialization to reduce startup time
+- **Development Mode**: Skip heavy operations during development
+
+### Model Loading Strategy
+```python
+# Instead of loading at import time:
+nlp = spacy.load("en_core_web_sm")  # ❌ Slow startup
+
+# Use lazy loading:
+from backend.lazy_nlp import get_nlp_model
+nlp = get_nlp_model()  # ✅ Load only when needed
+```
+
+## Database Setup
+
+### MongoDB Configuration
+- **Database**: `Transformo`
+- **Collections**: 
+  - `metadata`: Document metadata and analysis
+  - `actions`: User approval workflows
+  - `directories`: Folder structure
+  - `users`: User management
+
+### GridFS for File Storage
+Large files stored in MongoDB GridFS for efficient retrieval and metadata management.
+
+## Testing Strategy
+
+### Backend Testing
+- Mock external API calls (OpenAI, etc.)
+- Test document processing pipeline with sample files
+- Validate department-based routing logic
+
+### Frontend Testing
+- Component testing with mock API responses
+- User workflow testing (upload, search, approval)
+- Cross-browser compatibility for KMRL staff devices
+
+## Deployment Considerations
+
+### Production Environment
+- Set `DEVELOPMENT_MODE=false` for production
+- Configure proper MongoDB connection strings
+- Set up SSL certificates for secure document handling
+- Implement proper logging and monitoring
+
+### Scaling for KMRL Expansion
+- Plan for increased document volume (new corridors, depots)
+- Consider document archival strategies
+- Implement caching for frequently accessed documents
+- Monitor AI model performance and costs

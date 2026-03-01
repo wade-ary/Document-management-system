@@ -1,0 +1,55 @@
+---
+globs: frontend/**/*.{ts,tsx,js,jsx}
+description: "Frontend development guidelines for KMRL document management UI"
+---
+
+# Frontend Development Guidelines
+
+## Architecture Overview
+- **Next.js 14**: React-based frontend with TypeScript
+- **Centralized API Configuration**: Use [frontend/src/config/api.ts](mdc:frontend/src/config/api.ts) for all endpoints
+- **Component-Based**: Modular UI components for document management
+
+## Key UI Components
+
+### Document Management
+- **[frontend/src/components/ModernFileList.tsx](mdc:frontend/src/components/ModernFileList.tsx)**: Primary file browser interface
+- **[frontend/src/components/UploadModal.tsx](mdc:frontend/src/components/UploadModal.tsx)**: File upload with compliance checking
+- **[frontend/src/components/FileViewer.tsx](mdc:frontend/src/components/FileViewer.tsx)**: Document preview and metadata display
+
+### Search & Discovery
+- **[frontend/src/components/ExtensiveSearchModal.tsx](mdc:frontend/src/components/ExtensiveSearchModal.tsx)**: Advanced search interface
+- **[frontend/src/components/AssistantChat.tsx](mdc:frontend/src/components/AssistantChat.tsx)**: AI-powered document queries
+
+### Admin Dashboard
+- **[frontend/src/components/dashboard/](mdc:frontend/src/components/dashboard/)**: Admin management components
+- **RequestTable.tsx**: Approval workflows for document operations
+- **ActivityTable.tsx**: Audit trail and user activity monitoring
+- **Metrics.tsx**: Document processing analytics
+
+## Development Standards
+
+### API Integration
+- **ALWAYS** use centralized API endpoints from [frontend/src/config/api.ts](mdc:frontend/src/config/api.ts)
+- **NO hardcoded URLs**: Use `API_ENDPOINTS` or `EXTERNAL_API_ENDPOINTS` constants
+- **Environment Variables**: Configure base URLs via `NEXT_PUBLIC_API_BASE_URL`
+
+### User Experience for KMRL Context
+- **Role-based Views**: Different interfaces for station controllers, engineers, finance officers
+- **Quick Actions**: Fast access to department-specific documents
+- **Bilingual Support**: Handle English and Malayalam content display
+- **Mobile Responsive**: Field staff access on tablets/phones
+
+### Component Guidelines
+1. **TypeScript**: Use strict typing for all props and state
+2. **Error Boundaries**: Handle API failures gracefully
+3. **Loading States**: Show progress for document processing operations
+4. **Accessibility**: Follow WCAG guidelines for government applications
+5. **Caching**: Implement client-side caching for frequently accessed documents
+
+## Key Features Implementation
+- **Document Upload**: Multi-file support with format validation
+- **Compliance Checking**: PII detection before storage
+- **Search Interface**: Text, metadata, and semantic search options
+- **Approval Workflows**: Visual status tracking for admin reviews
+- **Document Preview**: In-browser viewing with metadata overlay

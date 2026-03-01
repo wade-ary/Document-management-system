@@ -1,0 +1,87 @@
+<!-- templates/import_results.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Import Results</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .section {
+            margin: 20px 0;
+        }
+        .section h2 {
+            color: #555;
+        }
+        .file-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .file-list li {
+            background-color: #fff;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-left: 5px solid #28A745; /* Green for success */
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .failed {
+            border-left-color: #dc3545; /* Red for failure */
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 30px;
+        }
+        .back-link a {
+            padding: 10px 20px;
+            background-color: #17A2B8;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .back-link a:hover {
+            background-color: #138496;
+        }
+    </style>
+</head>
+<body>
+    <h1>Import Results</h1>
+
+    <div class="section">
+        <h2>Successfully Imported Files:</h2>
+        {% if imported_files and imported_files|length > 0 %}
+            <ul class="file-list">
+                {% for file in imported_files %}
+                    <li>{{ file.filename }} ({{ file.file_type }})</li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p>No files were imported successfully.</p>
+        {% endif %}
+    </div>
+
+    <div class="section">
+        <h2>Failed Files:</h2>
+        {% if failed_files and failed_files|length > 0 %}
+            <ul class="file-list">
+                {% for file in failed_files %}
+                    <li class="failed">File ID: {{ file.file_id }} - Reason: {{ file.reason }}</li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p>No files failed to import.</p>
+        {% endif %}
+    </div>
+
+    <div class="back-link">
+        <a href="{{ url_for('protected_resource') }}">Back to Your Files</a>
+    </div>
+</body>
+</html>

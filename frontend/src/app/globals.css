@@ -1,0 +1,328 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@100;200;300;400;500;600;700;800;900&display=swap');
+
+nextjs-portal {
+
+  display: none;
+
+}
+
+
+
+body {
+
+  padding: 0 !important; 
+
+  overflow: auto !important;
+
+}
+
+@layer base {
+  :root {
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+
+  .dark {
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* :root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+} */
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+    .blue {
+      color: hsl(220, 100%, 50%);
+    }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+body > .skiptranslate,.goog-logo-link,.gskiptranslate,.goog-te-gadget span,.goog-te-banner-frame,#goog-gt-tt, .goog-te-balloon-frame,div#goog-gt-{
+  display: none!important;
+}
+.goog-te-gadget {
+  color: transparent!important;
+  font-size:0px;
+}
+.goog-text-highlight {
+  background: none !important;
+  box-shadow: none !important;
+}
+#google_translate_element select {
+  background-color: #f5f5f5;
+  color: #333333;
+  border: 2px solid #e5e5e5;
+  font-weight: 600;
+  width: 125px;
+  border-radius: 0.375rem;
+  height: auto;
+  padding: 0.5rem 0.5rem;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  font-size: 0.875rem;
+  transition: background-color 0.2s ease;
+}
+
+#google_translate_element select:hover {
+  background-color: #e5e5e5;
+}
+
+select:hover {
+  background-color: #e5e5e5;
+}
+
+select:focus {
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+}
+
+
+.no-visible-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.no-visible-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ========================================
+   ACCESSIBILITY FEATURES
+   ======================================== */
+
+/* High Contrast Mode - WCAG AAA compliant */
+body.high-contrast {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+body.high-contrast * {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border-color: #ffffff !important;
+}
+
+body.high-contrast a,
+body.high-contrast button,
+body.high-contrast [role="button"] {
+  color: #ffff00 !important;
+  text-decoration: underline !important;
+  font-weight: bold !important;
+}
+
+body.high-contrast a:hover,
+body.high-contrast button:hover,
+body.high-contrast [role="button"]:hover {
+  color: #00ffff !important;
+  background-color: #333333 !important;
+}
+
+body.high-contrast input,
+body.high-contrast textarea,
+body.high-contrast select {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border: 2px solid #ffffff !important;
+}
+
+body.high-contrast input:focus,
+body.high-contrast textarea:focus,
+body.high-contrast select:focus {
+  outline: 3px solid #ffff00 !important;
+  outline-offset: 2px !important;
+}
+
+/* Preserve images and icons in high contrast */
+body.high-contrast img,
+body.high-contrast svg,
+body.high-contrast [role="img"] {
+  filter: brightness(0) invert(1) !important;
+  opacity: 0.9 !important;
+}
+
+/* Keep important UI elements visible */
+body.high-contrast .bg-blue-600,
+body.high-contrast .bg-blue-700,
+body.high-contrast .bg-green-600,
+body.high-contrast .bg-red-600 {
+  background-color: #333333 !important;
+  border: 2px solid #ffffff !important;
+}
+
+/* Color Blind Mode - Deuteranopia (Red-Green) friendly palette */
+body.color-blind {
+  /* Use blue-yellow color scheme instead of red-green */
+}
+
+/* Replace red colors with orange/amber */
+body.color-blind .text-red-600,
+body.color-blind .text-red-700 {
+  color: #d97706 !important; /* amber-600 */
+}
+
+body.color-blind .bg-red-600,
+body.color-blind .bg-red-700,
+body.color-blind .bg-red-50 {
+  background-color: #fef3c7 !important; /* amber-100 */
+}
+
+body.color-blind .border-red-600 {
+  border-color: #d97706 !important; /* amber-600 */
+}
+
+body.color-blind .hover\:bg-red-50:hover {
+  background-color: #fef3c7 !important; /* amber-100 */
+}
+
+/* Replace green colors with blue */
+body.color-blind .text-green-600,
+body.color-blind .text-green-700 {
+  color: #2563eb !important; /* blue-600 */
+}
+
+body.color-blind .bg-green-600,
+body.color-blind .bg-green-700,
+body.color-blind .bg-green-50 {
+  background-color: #dbeafe !important; /* blue-100 */
+}
+
+body.color-blind .border-green-500,
+body.color-blind .border-green-600 {
+  border-color: #2563eb !important; /* blue-600 */
+}
+
+body.color-blind .hover\:bg-green-50:hover {
+  background-color: #dbeafe !important; /* blue-100 */
+}
+
+/* Enhance contrast for better visibility */
+body.color-blind {
+  filter: contrast(1.1);
+}
+
+/* Use patterns/icons in addition to color for status indicators */
+body.color-blind .status-success::before {
+  content: "✓ ";
+  font-weight: bold;
+}
+
+body.color-blind .status-error::before {
+  content: "✗ ";
+  font-weight: bold;
+}
+
+body.color-blind .status-warning::before {
+  content: "⚠ ";
+  font-weight: bold;
+}
+
+/* Ensure focus indicators are always visible */
+body.color-blind *:focus,
+body.high-contrast *:focus {
+  outline: 3px solid #3b82f6 !important;
+  outline-offset: 2px !important;
+}
+
+/* Accessibility announcement for screen readers */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+
+
+
+

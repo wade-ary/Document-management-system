@@ -1,0 +1,17 @@
+{
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "env": {
+    "NEXT_PUBLIC_API_BASE_URL": "https://sih-25254-8xgca.ondigitalocean.app",
+    "NEXT_PUBLIC_EXTERNAL_API_BASE_URL": "https://sih-25254-8xgca.ondigitalocean.app",
+    "NEXT_PUBLIC_FALLBACK_API_URL": "http://127.0.0.1:5000",
+    "NODE_ENV": "production"
+  },
+  "build": {
+    "env": {
+      "NEXT_PUBLIC_API_BASE_URL": "https://sih-25254-8xgca.ondigitalocean.app"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+---
+alwaysApply: true
+---
+# KMRL Document Management System (TransformoDocs)
+
+## Problem Statement Context
+This system addresses KMRL's (Kochi Metro Rail Limited) critical document management challenges:
+
+- **Information Latency**: Managers spend hours finding actionable content in lengthy documents
+- **Siloed Awareness**: Departments work with outdated or incomplete information
+- **Compliance Exposure**: Regulatory updates get buried, risking audit non-conformities  
+- **Knowledge Attrition**: Institutional memory locked in static files
+- **Duplicated Effort**: Teams independently create summaries of same documents
+
+## Core Architecture
+
+### Backend Components
+- **Flask API** ([app.py](mdc:app.py)): Main application server with document processing endpoints
+- **MongoDB Integration** ([backend/db.py](mdc:backend/db.py)): Document storage and metadata management
+- **AI Processing Pipeline**: 
+  - Text extraction ([backend/new_extract.py](mdc:backend/new_extract.py))
+  - Document analysis ([backend/main.py](mdc:backend/main.py))
+  - Search capabilities ([backend/search.py](mdc:backend/search.py))
+  - RAG implementation ([backend/RAG.py](mdc:backend/RAG.py))
+
+### Frontend Components  
+- **Next.js Application** in [frontend/](mdc:frontend/) directory
+- **API Configuration** ([frontend/src/config/api.ts](mdc:frontend/src/config/api.ts))
+- **Document Management UI** components for upload, search, and analysis
+
+### Key Features
+1. **Multi-format Support**: PDF, DOCX, images with OCR
+2. **Bilingual Processing**: English and Malayalam content handling
+3. **AI-Powered Analysis**: Document summarization, tagging, and routing
+4. **Role-based Access**: Department-specific document visibility
+5. **Compliance Tracking**: Regulatory document management
+6. **Search & Discovery**: Semantic search across document corpus
+
+## Stakeholder Requirements
+- **Station Controllers**: Quick access to operational bulletins
+- **Rolling-stock Engineers**: Technical drawings and maintenance cards
+- **Finance Officers**: Invoice processing and vendor correspondence  
+- **Executive Directors**: Board minutes and strategic documents
+- **HR Teams**: Policy updates and training materials
+- **Procurement**: Contract management and supplier communications

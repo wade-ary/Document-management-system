@@ -1,0 +1,182 @@
+/* Custom Driver.js Theme for MoE Document Management */
+
+.driver-popover.driverjs-theme {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  border: 2px solid #3b82f6;
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(59, 130, 246, 0.1);
+  padding: 20px;
+  max-width: 400px;
+}
+
+.driver-popover.driverjs-theme .driver-popover-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1e3a8a;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.driver-popover.driverjs-theme .driver-popover-description {
+  font-size: 14px;
+  color: #475569;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.driver-popover.driverjs-theme .driver-popover-progress-text {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.driver-popover.driverjs-theme .driver-popover-prev-btn {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.driver-popover.driverjs-theme .driver-popover-prev-btn:hover {
+  background: #e2e8f0;
+  color: #334155;
+  transform: translateX(-2px);
+}
+
+.driver-popover.driverjs-theme .driver-popover-next-btn,
+.driver-popover.driverjs-theme .driver-popover-close-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  box-shadow: 0 4px 14px 0 rgba(59, 130, 246, 0.4);
+}
+
+.driver-popover.driverjs-theme .driver-popover-next-btn:hover,
+.driver-popover.driverjs-theme .driver-popover-close-btn:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px 0 rgba(59, 130, 246, 0.5);
+}
+
+.driver-popover.driverjs-theme .driver-popover-arrow-side-left {
+  border-left-color: #3b82f6;
+}
+
+.driver-popover.driverjs-theme .driver-popover-arrow-side-right {
+  border-right-color: #3b82f6;
+}
+
+.driver-popover.driverjs-theme .driver-popover-arrow-side-top {
+  border-top-color: #3b82f6;
+}
+
+.driver-popover.driverjs-theme .driver-popover-arrow-side-bottom {
+  border-bottom-color: #3b82f6;
+}
+
+/* Overlay styling */
+.driver-overlay {
+  background: rgba(15, 23, 42, 0.5) !important;
+}
+
+/* Highlighted element styling */
+.driver-active-element {
+  outline: 3px solid #3b82f6 !important;
+  outline-offset: 4px;
+  border-radius: 12px;
+}
+
+/* Progress bar styling */
+.driver-popover.driverjs-theme .driver-popover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.driver-popover.driverjs-theme .driver-popover-navigation-btns {
+  display: flex;
+  gap: 8px;
+}
+
+/* Close button in corner */
+.driver-popover.driverjs-theme .driver-popover-close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: #f1f5f9;
+  color: #64748b;
+  box-shadow: none;
+}
+
+.driver-popover.driverjs-theme .driver-popover-close-btn:hover {
+  background: #e2e8f0;
+  color: #475569;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Animation for tour start */
+@keyframes tourPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 15px rgba(59, 130, 246, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}
+
+.tour-highlight-pulse {
+  animation: tourPulse 2s infinite;
+}
+
+/* Tour trigger button styling */
+.tour-trigger-button {
+  position: fixed;
+  bottom: 100px;
+  right: 24px;
+  z-index: 50;
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  color: white;
+  border: none;
+  padding: 14px 24px;
+  border-radius: 50px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 10px 40px -10px rgba(59, 130, 246, 0.5);
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tour-trigger-button:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 15px 50px -10px rgba(59, 130, 246, 0.6);
+}
+
+.tour-trigger-button svg {
+  width: 20px;
+  height: 20px;
+}

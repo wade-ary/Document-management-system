@@ -1,0 +1,21 @@
+name: sih2025-25080
+services:
+- name: backend
+  source_dir: /
+  github:
+    repo: aryan4codes/SIH2025-25080
+    branch: main
+    deploy_on_push: true
+  build_command: echo "Building with Docker"
+  dockerfile_path: Dockerfile
+  http_port: 8080
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  health_check:
+    http_path: "/"
+    port: 8080
+  envs:
+  - key: PORT
+    value: "8080"
+  - key: MPLCONFIGDIR
+    value: "/tmp/matplotlib"

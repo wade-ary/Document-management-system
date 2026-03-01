@@ -1,0 +1,100 @@
+---
+description: "API endpoint documentation for KMRL document management system"
+---
+
+# API Endpoints Reference
+
+## Document Operations
+
+### File Management
+- **POST /upload**: Upload documents with metadata and compliance checking
+- **POST /view_file**: Retrieve document content for preview
+- **POST /delete**: Request document deletion (requires approval)
+- **POST /move**: Move documents between directories
+- **POST /update_tags**: Update document tags and metadata
+
+### Directory Operations  
+- **POST /listdir**: List directory contents
+- **POST /listdir/department/{user_id}**: Department-specific file listing
+- **POST /listdir/{user_id}**: User-specific file listing
+- **POST /create_dir**: Create new directory
+- **POST /delete_dir**: Delete directory
+
+### Analysis & Processing
+- **POST /analyze**: Analyze document and suggest routing
+- **POST /ask-file**: Query specific document content
+- **POST /compliance-summary**: Generate compliance analysis
+- **POST /kie-directory**: Extract key information from folder
+
+## Search Operations
+
+### Search Endpoints
+- **POST /search/assisted**: Simple text-based search
+- **POST /search/extensive**: Advanced multi-filter search
+- **POST /search/finetuned**: Fine-tuned model search
+- **POST /search/chat**: Conversational search with RAG
+
+### Search Parameters
+```typescript
+interface ExtensiveSearchRequest {
+  searchText: string;
+  fileType: string[];
+  peopleNames: string[];
+  customTags: string[];
+  dateRange: [string, string];
+}
+```
+
+## Compliance & Security
+
+### Redaction Operations
+- **POST /redact**: Permanently redact PII from document
+- **POST /redact/temp**: Generate temporary redacted version
+- **POST /isCompliant**: Check document for sensitive data
+- **POST /upload-redacted**: Upload pre-redacted document pairs
+
+### Admin Approval Workflows
+- **POST /req/upload**: Request upload approval
+- **POST /req/delete**: Request deletion approval
+- **GET /admin/pending**: Fetch pending approval requests
+- **POST /admin/upload/approve**: Approve upload request
+- **POST /admin/upload/reject**: Reject upload request
+
+## User Management
+
+### Authentication & Authorization
+- **POST /signup**: User registration with department assignment
+- **GET /admin/actions**: Fetch user activity log
+- **GET /admin/combined-summary**: Dashboard metrics and analytics
+
+### External API Access
+- **POST /external/register_app**: Register external application
+- **GET /external/api_access/details**: Get API access credentials
+- **POST /admin/api_access/approve**: Approve external API access
+
+## Response Formats
+
+### Standard Success Response
+```json
+{
+  "message": "Operation completed successfully",
+  "data": { /* operation-specific data */ },
+  "status": 200
+}
+```
+
+### Error Response
+```json
+{
+  "error": "Error description",
+  "details": "Detailed error information",
+  "code": 400
+}
+```
+
+## Environment Configuration
+Base URLs configured via environment variables:
+- **NEXT_PUBLIC_API_BASE_URL**: Main Flask backend (default: http://127.0.0.1:5001)
+- **NEXT_PUBLIC_EXTERNAL_API_BASE_URL**: External services (default: http://localhost:5000)
+
+Use centralized configuration from [frontend/src/config/api.ts](mdc:frontend/src/config/api.ts) for all API calls.

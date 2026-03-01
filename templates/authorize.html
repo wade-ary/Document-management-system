@@ -1,0 +1,15 @@
+<!-- templates/authorize.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Authorize Application</title>
+</head>
+<body>
+    <h1>Authorize {{ grant.client.client_id }}</h1>
+    <p>Do you allow {{ grant.client.client_id }} to access your account?</p>
+    <form method="post">
+        <button name="confirm" value="yes">Yes</button>
+        <button name="confirm" value="no">No</button>
+    </form>
+</body>
+</html>
