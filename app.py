@@ -1450,7 +1450,7 @@ def search_assisted():
     query = data.get("query", "").strip()
     if not query:
         return jsonify({"error": "No query provided."}), 400
-    return search_files_only_text(query=query)
+    return jsonify(search_files_only_text(query=query)), 200
 
 
 @app.route("/search/extensive", methods=["POST"])
@@ -1475,13 +1475,14 @@ def extensive_search():
         f"Received search parameters: searchText='{search_text}', fileType={file_types}, peopleNames={people_names}, customTags={custom_tags}"
     )
 
-    return search_files(
+    return jsonify(search_files(
         query=search_text,
         file_types=file_types,
         tags=custom_tags,
         date_range=date_range,
-        top_k=data.get("limit", 50)  # Allow customizable result limit
-    )
+        top_k=data.get("limit", 50),  # Allow customizable result limit
+        metadata_collection=metadata_collection,
+    )), 200
 
 
 @app.route("/agent", methods=["POST"])
@@ -1575,7 +1576,7 @@ def rebuild_search_indexes_endpoint():
     """
     try:
         from backend.search import rebuild_search_indexes
-        result = rebuild_search_indexes()
+        result = rebuild_search_indexes(metadata_collection=metadata_collection)
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": f"Failed to rebuild search indexes: {str(e)}"}), 500
