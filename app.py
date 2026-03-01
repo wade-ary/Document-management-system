@@ -477,13 +477,20 @@ def api_get_overlays(doc_id, page):
 def trigger_compliance_analysis(file_id: str, file_name: str, extracted_text: str, user_id: str = None):
     """Trigger compliance analysis for uploaded files from directory"""
     try:
-        # Call the compliance analysis function
-        compliance_result = process_file_for_compliance(
-            file_id=file_id,
-            filename=file_name,
-            extracted_text=extracted_text,
-            user_id=user_id
+        # If compliance already computed during ingestion, reuse it
+        existing = metadata_collection.find_one(
+            {"file_id": file_id}, {"compliance": 1, "_id": 0}
         )
+        compliance_result = (existing or {}).get("compliance")
+
+        # Otherwise call the compliance analysis function now
+        if not compliance_result:
+            compliance_result = process_file_for_compliance(
+                file_id=file_id,
+                filename=file_name,
+                extracted_text=extracted_text,
+                user_id=user_id
+            )
         
         if compliance_result:
             print(f"DEBUG: compliance_result keys: {list(compliance_result.keys())}")

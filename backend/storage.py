@@ -13,6 +13,7 @@ from werkzeug.datastructures import FileStorage
 from backend.db import get_db, get_fs
 from backend.extract import extract_text_from_file
 from backend.search import add_document_to_indexes
+from backend.compliance_api import process_file_for_compliance
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,17 @@ def upload_file(
             add_document_to_indexes(file_id, extracted_text)
         except Exception as e:
             logger.warning("Add to search indexes failed (document still saved): %s", e)
+
+        # 5. Run compliance analysis and persist structured metadata
+        try:
+            process_file_for_compliance(
+                file_id=file_id,
+                filename=filename,
+                extracted_text=extracted_text,
+                user_id=user_id,
+            )
+        except Exception as e:
+            logger.warning("Compliance processing failed (document still saved): %s", e)
 
     return file_id, 200
 
