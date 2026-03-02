@@ -1,5 +1,7 @@
 # Retrieval System Design
 
+> **Full documentation:** See [RETRIEVAL_AND_QUERY_CLASSIFICATION.md](RETRIEVAL_AND_QUERY_CLASSIFICATION.md) for retrieval pipeline, query classification, and single-hop vs multi-hop behaviour.
+
 ## Overview
 
 Retrieval is split into:
