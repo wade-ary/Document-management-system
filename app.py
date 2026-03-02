@@ -24,7 +24,10 @@ from werkzeug.datastructures import FileStorage
 from backend.agent import initialize_agent_with_tools
 from backend.main import analyze_file
 from backend.new_extract import ask_file, extract_text_from_file
-from backend.search import search_files, search_files_only_text
+from backend.query_classifier import classify_query
+from backend.retrieval import single_hop_retrieval, multi_hop_retrieval
+from backend.blurb import start_blurb_background, get_blurb_cached, get_blurb_cached_by_query
+from backend.precedent_finder import find_precedents
 from backend.storage import (
     create_new_dir,
     delete_dir,
@@ -1447,49 +1450,95 @@ def analyze_endpoint():
         ), 500
 
 
-@app.route("/search/assisted", methods=["POST"])
-def search_assisted():
+@app.route("/api/query", methods=["POST"])
+def api_query():
     """
-    Perform an assisted search based on a single query parameter:
-    - query (string): The main text query.
+    Standard retrieval with query classification.
+    Body: { "query": str (required), "filters": optional { date_from, date_to, department, file_types } }
+    Returns: { "intent": "single_hop"|"multi_hop", "reasoning": str, "results": [...], "blurb_task_id": str }
     """
-    data = request.get_json()
-    query = data.get("query", "").strip()
-    if not query:
-        return jsonify({"error": "No query provided."}), 400
-    return jsonify(search_files_only_text(query=query)), 200
+    try:
+        data = request.get_json() or {}
+        query = (data.get("query") or "").strip()
+        if not query:
+            return jsonify({"error": "query is required"}), 400
+        filters = data.get("filters") or {}
+        classification = classify_query(query)
+        intent = classification.get("intent", "single_hop")
+        if intent == "multi_hop":
+            docs = multi_hop_retrieval(query, metadata_collection, filters=filters or None)
+        else:
+            docs = single_hop_retrieval(query, metadata_collection, filters=filters or None)
+        blurb_task_id = start_blurb_background(query, docs, metadata_collection)
+        return jsonify({
+            "intent": intent,
+            "reasoning": classification.get("reasoning", ""),
+            "results": docs,
+            "blurb_task_id": blurb_task_id,
+        }), 200
+    except Exception as e:
+        logging.exception("api_query: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 
-@app.route("/search/extensive", methods=["POST"])
-def extensive_search():
+@app.route("/api/blurb", methods=["POST"])
+def api_blurb():
     """
-    Perform an extensive search based on multiple optional parameters:
-    - searchText (string): The main text query.
-    - fileType (list of strings): File extensions/types to filter by.
-    - peopleNames (list of strings): Names to search within important words.
-    - customTags (list of strings): Custom tags to filter results.
+    Get blurb: start one (if query + doc file_ids given) or poll by task_id.
+    Body: { "task_id": str } OR { "query": str, "doc_file_ids": [str] }
+    Returns: { "status": "done"|"running"|"error", "blurb": str|null, "error": str|null }
     """
-    data = request.get_json()
+    try:
+        data = request.get_json() or {}
+        task_id = data.get("task_id")
+        if task_id:
+            entry = get_blurb_cached(task_id)
+        else:
+            query = (data.get("query") or "").strip()
+            doc_file_ids = data.get("doc_file_ids") or []
+            if not query or not doc_file_ids:
+                return jsonify({"error": "either task_id or (query and doc_file_ids) required"}), 400
+            entry = get_blurb_cached_by_query(query, doc_file_ids)
+        if entry is None:
+            return jsonify({"status": "pending", "blurb": None, "error": None}), 200
+        return jsonify(entry), 200
+    except Exception as e:
+        logging.exception("api_blurb: %s", e)
+        return jsonify({"error": str(e)}), 500
 
-    #     # Extract parameters with defaults
-    search_text = data.get("searchText", "").strip()
-    file_types = data.get("fileType", [])  # Expecting a list
-    people_names = data.get("peopleNames", [])  # List of names
-    custom_tags = data.get("customTags", [])  # List of tags
-    date_range = data.get("dateRange", [])  # List of dates [start, end]
-    date_range = tuple(date_range)
-    app.logger.debug(
-        f"Received search parameters: searchText='{search_text}', fileType={file_types}, peopleNames={people_names}, customTags={custom_tags}"
-    )
 
-    return jsonify(search_files(
-        query=search_text,
-        file_types=file_types,
-        tags=custom_tags,
-        date_range=date_range,
-        top_k=data.get("limit", 50),  # Allow customizable result limit
-        metadata_collection=metadata_collection,
-    )), 200
+@app.route("/api/precedents", methods=["POST"])
+def api_precedents():
+    """
+    Find documents similar to the given document (precedent finder).
+    Body: { "file_id": str (required), "similarity_threshold": float?, "file_types": list?, "date_range": [from, to]?, "top_k": int? }
+    Returns: { "results": [...], "total_found": int, "current_document": {...} }
+    """
+    try:
+        data = request.get_json() or {}
+        file_id = data.get("file_id")
+        if not file_id:
+            return jsonify({"error": "file_id is required"}), 400
+        similarity_threshold = data.get("similarity_threshold", 0.2)
+        file_types = data.get("file_types")
+        date_range = data.get("date_range")
+        if date_range and isinstance(date_range, list) and len(date_range) == 2:
+            date_range = tuple(date_range)
+        top_k = data.get("top_k", 50)
+        result = find_precedents(
+            file_id=file_id,
+            similarity_threshold=similarity_threshold,
+            file_types=file_types,
+            date_range=date_range,
+            top_k=top_k,
+            metadata_collection=metadata_collection,
+        )
+        if result.get("error"):
+            return jsonify(result), 404
+        return jsonify(result), 200
+    except Exception as e:
+        logging.exception("api_precedents: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/agent", methods=["POST"])
@@ -1504,12 +1553,6 @@ def agent_endpoint():
     print(response)
     return jsonify(response), 200
 
-
-@app.route('/search/finetuned', methods=['POST'])
-def finetuned_search_endpoint():
-    data = request.get_json()
-    query = data.get('query')
-    return finetune_search(query)
 
 @app.route('/translate', methods=['POST'])
 def translate_text_endpoint():
@@ -1574,31 +1617,6 @@ def translate_text_endpoint():
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"Translation failed: {str(e)}"}), 500
-
-@app.route("/search/rebuild", methods=["POST"])
-def rebuild_search_indexes_endpoint():
-    """
-    Rebuild search indexes manually.
-    Use this when you upload new documents or want to refresh the indexes.
-    """
-    try:
-        from backend.search import rebuild_search_indexes
-        result = rebuild_search_indexes(metadata_collection=metadata_collection)
-        return jsonify(result), 200
-    except Exception as e:
-        return jsonify({"error": f"Failed to rebuild search indexes: {str(e)}"}), 500
-
-@app.route("/search/stats", methods=["GET"])
-def search_stats_endpoint():
-    """
-    Get statistics about the search indexes.
-    """
-    try:
-        from backend.search import get_search_stats
-        stats = get_search_stats()
-        return jsonify(stats), 200
-    except Exception as e:
-        return jsonify({"error": f"Failed to get search stats: {str(e)}"}), 500
 
 @app.route("/req/upload", methods=["POST"])
 def request_upload():
@@ -2453,19 +2471,6 @@ def get_admin_actions():
 
 
 
-@app.route('/search/chat', methods=['POST'])
-def chat_search():
-    """
-    Perform a chat-based search based on a single query parameter:
-    - query (string): The main text query.
-    """
-    data = request.get_json()
-    query = data.get('query', '').strip()
-    if not query:
-        return jsonify({"error": "No query provided."}), 400
-    return retrieval_augmented_generation(query)
-
-
 @app.route('/ask-file', methods=['POST'])
 def ask_file_endpoint():
     data = request.get_json()
@@ -2804,169 +2809,9 @@ def suggest_document_types_endpoint():
         }), 500
 
 
-# ---------------------------------- PRECEDENT FINDER ROUTES --------------------------------------------------- #
-
-@app.route("/api/find-precedents", methods=["POST"])
-def find_precedents_endpoint():
-    """
-    Find historical similar documents/cases for a given document.
-    
-    JSON body:
-    - file_id: Document ID to find precedents for (required)
-    - similarity_threshold: Minimum similarity score 0.0-1.0 (default: 0.3)
-    - file_types: Optional list of file types to filter by
-    - date_range: Optional [start_date, end_date] to filter by
-    - top_k: Maximum number of results (default: 50)
-    """
-    try:
-        from backend.precedent_finder import find_precedents
-        
-        data = request.get_json()
-        file_id = data.get('file_id')
-        
-        if not file_id:
-            return jsonify({"error": "file_id is required"}), 400
-        
-        similarity_threshold = data.get('similarity_threshold', 0.3)
-        file_types = data.get('file_types')
-        date_range = data.get('date_range')
-        top_k = data.get('top_k', 50)
-        
-        # Validate similarity threshold
-        if not 0.0 <= similarity_threshold <= 1.0:
-            return jsonify({"error": "similarity_threshold must be between 0.0 and 1.0"}), 400
-        
-        # Convert date_range list to tuple if provided
-        if date_range and isinstance(date_range, list) and len(date_range) == 2:
-            date_range = tuple(date_range)
-        
-        result = find_precedents(
-            file_id=file_id,
-            similarity_threshold=similarity_threshold,
-            file_types=file_types,
-            date_range=date_range,
-            top_k=top_k
-        )
-        
-        if "error" in result:
-            return jsonify(result), 404
-        
-        return jsonify(result), 200
-        
-    except Exception as e:
-        logging.error(f"Error in find_precedents_endpoint: {str(e)}")
-        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
-
-
-@app.route("/api/compare-documents", methods=["POST"])
-def compare_documents_endpoint():
-    """
-    Compare two documents side-by-side and identify matching sections.
-    
-    JSON body:
-    - file_id_1: First document ID (required)
-    - file_id_2: Second document ID (required)
-    """
-    try:
-        from backend.precedent_finder import compare_documents
-        
-        data = request.get_json()
-        file_id_1 = data.get('file_id_1')
-        file_id_2 = data.get('file_id_2')
-        
-        if not file_id_1 or not file_id_2:
-            return jsonify({"error": "Both file_id_1 and file_id_2 are required"}), 400
-        
-        result = compare_documents(file_id_1, file_id_2)
-        
-        if "error" in result:
-            return jsonify(result), 404
-        
-        return jsonify(result), 200
-        
-    except Exception as e:
-        logging.error(f"Error in compare_documents_endpoint: {str(e)}")
-        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
-
-
-@app.route("/api/precedent-analysis", methods=["POST"])
-def precedent_analysis_endpoint():
-    """
-    Generate AI-powered analysis explaining how a precedent document relates to current document.
-    
-    JSON body:
-    - current_file_id: Current document ID (required)
-    - precedent_file_id: Precedent document ID (required)
-    """
-    try:
-        from backend.precedent_finder import analyze_precedent_relationship
-        
-        data = request.get_json()
-        current_file_id = data.get('current_file_id')
-        precedent_file_id = data.get('precedent_file_id')
-        
-        if not current_file_id or not precedent_file_id:
-            return jsonify({"error": "Both current_file_id and precedent_file_id are required"}), 400
-        
-        result = analyze_precedent_relationship(current_file_id, precedent_file_id)
-        
-        if "error" in result:
-            return jsonify(result), 404
-        
-        return jsonify(result), 200
-        
-    except Exception as e:
-        logging.error(f"Error in precedent_analysis_endpoint: {str(e)}")
-        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
-
-
-@app.route("/api/compare-multi-documents", methods=["POST"])
-def compare_multi_documents_endpoint():
-    """
-    Compare and analyze multiple documents to generate:
-    1. Metadata summary for each document
-    2. Analysis of common themes and unique aspects
-    3. Relationships between documents
-    
-    JSON body:
-    - file_ids: List of document IDs (required, minimum 2)
-    """
-    try:
-        from backend.multi_doc_comparison import compare_multiple_documents
-        
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "Invalid request body"}), 400
-            
-        file_ids = data.get('file_ids', [])
-        
-        if not file_ids or not isinstance(file_ids, list):
-            return jsonify({"error": "file_ids must be a non-empty list"}), 400
-            
-        if len(file_ids) < 2:
-            return jsonify({"error": "At least 2 file_ids are required"}), 400
-            
-        if len(file_ids) > 20:
-            return jsonify({"error": "Maximum 20 documents can be compared at once"}), 400
-        
-        # Remove duplicates
-        file_ids = list(set(file_ids))
-        
-        logging.info(f"Comparing {len(file_ids)} documents: {file_ids}")
-        result = compare_multiple_documents(file_ids)
-        
-        if "error" in result:
-            logging.warning(f"Comparison error: {result['error']}")
-            return jsonify(result), 400
-        
-        logging.info(f"Successfully compared {len(file_ids)} documents")
-        return jsonify(result), 200
-        
-    except Exception as e:
-        logging.error(f"Error in compare_multi_documents_endpoint: {str(e)}", exc_info=True)
-        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
-
-# ---------------------------------- END OF PRECEDENT FINDER ROUTES --------------------------------------------------- #
+# ---------------------------------- KEY RETRIEVAL APIs (query, blurb, precedents) ----------------------------------- #
+# See POST /api/query, POST /api/blurb, POST /api/precedents defined above.
+# ---------------------------------- END --------------------------------------------------------------------------- #
 
 
 if __name__ == "__main__":
