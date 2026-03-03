@@ -15,6 +15,7 @@ Not connected to API yet; call single_hop_retrieval / multi_hop_retrieval direct
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.search import get_search_engine
@@ -32,6 +33,11 @@ SINGLE_HOP_RERANK_TOP = 10  # only rerank top 10 for single-hop
 MULTI_HOP_TOP_N_PER_INDEX = 80
 MULTI_HOP_FINAL_TOP_K = 50
 MULTI_HOP_RERANK_TOP = 50  # full rerank
+
+# Guardrails: min docs to attempt rerun with higher N; rerank timeout
+MIN_DOCS_SINGLE_HOP = 3
+MIN_DOCS_MULTI_HOP = 5
+RERANK_TIMEOUT_SECONDS = 5
 
 
 def _reciprocal_rank_fusion(
@@ -182,6 +188,36 @@ def _fuzzy_rerank(
     return items_sorted[:top_k]
 
 
+def _fuzzy_rerank_with_timeout(
+    items: List[Dict[str, Any]],
+    query: str,
+    top_k: int,
+    timeout_seconds: float = RERANK_TIMEOUT_SECONDS,
+) -> List[Dict[str, Any]]:
+    """Run _fuzzy_rerank with a timeout; on timeout return top_k by RRF order."""
+    result_holder: List[List[Dict[str, Any]]] = []
+    exc_holder: List[Exception] = []
+
+    def run() -> None:
+        try:
+            result_holder.append(_fuzzy_rerank(items, query, top_k))
+        except Exception as e:
+            exc_holder.append(e)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout=max(0.1, timeout_seconds))
+    if thread.is_alive():
+        logger.warning("Rerank timed out after %s s; returning top %s by RRF", timeout_seconds, top_k)
+        return items[:top_k]
+    if exc_holder:
+        logger.warning("Rerank failed: %s; returning top by RRF", exc_holder[0])
+        return items[:top_k]
+    if result_holder:
+        return result_holder[0]
+    return items[:top_k]
+
+
 def _run_pipeline(
     query: str,
     metadata_collection: Any,
@@ -207,7 +243,7 @@ def _run_pipeline(
     if do_fuzzy_rerank and filtered:
         to_rerank = filtered[:rerank_top]
         rest = filtered[rerank_top:]
-        reranked = _fuzzy_rerank(to_rerank, query, top_k=final_top_k)
+        reranked = _fuzzy_rerank_with_timeout(to_rerank, query, top_k=final_top_k)
         need = max(0, final_top_k - len(reranked))
         result = reranked + rest[:need]
         result = result[:final_top_k]
@@ -228,10 +264,9 @@ def single_hop_retrieval(
 ) -> List[Dict[str, Any]]:
     """
     Single-hop retrieval: one-doc direct answer.
-    Scaled down: smaller N per index, fewer final docs, lighter reranking
-    (only top rerank_top candidates get fuzzy rerank).
+    Guardrail: if result count < MIN_DOCS_SINGLE_HOP, rerun with higher N to get more.
     """
-    return _run_pipeline(
+    result = _run_pipeline(
         query=query,
         metadata_collection=metadata_collection,
         filters=filters,
@@ -240,6 +275,21 @@ def single_hop_retrieval(
         rerank_top=rerank_top,
         do_fuzzy_rerank=True,
     )
+    if len(result) < MIN_DOCS_SINGLE_HOP and (top_n_per_index < 200 or rerank_top < 50):
+        n2 = min(top_n_per_index * 2, 200)
+        r2 = min(rerank_top * 2, 50)
+        result2 = _run_pipeline(
+            query=query,
+            metadata_collection=metadata_collection,
+            filters=filters,
+            top_n_per_index=n2,
+            final_top_k=final_top_k,
+            rerank_top=r2,
+            do_fuzzy_rerank=True,
+        )
+        if len(result2) > len(result):
+            return result2
+    return result
 
 
 def multi_hop_retrieval(
@@ -253,10 +303,9 @@ def multi_hop_retrieval(
 ) -> List[Dict[str, Any]]:
     """
     Multi-hop retrieval: multiple docs, reasoning-based answer.
-    Full scale: larger N per index, more final docs, full fuzzy reranking
-    over more candidates.
+    Guardrail: if result count < MIN_DOCS_MULTI_HOP, rerun with higher N to get more.
     """
-    return _run_pipeline(
+    result = _run_pipeline(
         query=query,
         metadata_collection=metadata_collection,
         filters=filters,
@@ -265,3 +314,18 @@ def multi_hop_retrieval(
         rerank_top=rerank_top,
         do_fuzzy_rerank=True,
     )
+    if len(result) < MIN_DOCS_MULTI_HOP and (top_n_per_index < 300 or rerank_top < 100):
+        n2 = min(top_n_per_index * 2, 300)
+        r2 = min(rerank_top * 2, 100)
+        result2 = _run_pipeline(
+            query=query,
+            metadata_collection=metadata_collection,
+            filters=filters,
+            top_n_per_index=n2,
+            final_top_k=final_top_k,
+            rerank_top=r2,
+            do_fuzzy_rerank=True,
+        )
+        if len(result2) > len(result):
+            return result2
+    return result

@@ -26,6 +26,7 @@ from backend.main import analyze_file
 from backend.new_extract import ask_file, extract_text_from_file
 from backend.query_classifier import classify_query
 from backend.retrieval import single_hop_retrieval, multi_hop_retrieval
+from backend.guardrails import get_search_availability, notify_backend_tech
 from backend.blurb import start_blurb_background, get_blurb_cached, get_blurb_cached_by_query
 from backend.precedent_finder import find_precedents
 from backend.storage import (
@@ -1456,12 +1457,24 @@ def api_query():
     Standard retrieval with query classification.
     Body: { "query": str (required), "filters": optional { date_from, date_to, department, file_types } }
     Returns: { "intent": "single_hop"|"multi_hop", "reasoning": str, "results": [...], "blurb_task_id": str }
+    Guardrail: if search status is "down" (no indexes or only one lexical), return 503 and notify backend tech.
     """
     try:
         data = request.get_json() or {}
         query = (data.get("query") or "").strip()
         if not query:
             return jsonify({"error": "query is required"}), 400
+        availability = get_search_availability()
+        if availability.get("status") == "down":
+            if availability.get("notify_tech"):
+                notify_backend_tech(
+                    "Search system down: insufficient indexes (FAISS or at least two lexical required).",
+                    context=availability,
+                )
+            return jsonify({
+                "error": availability.get("message", "Search is temporarily unavailable. Technical team has been notified."),
+                "code": "SEARCH_SYSTEM_DOWN",
+            }), 503
         filters = data.get("filters") or {}
         classification = classify_query(query)
         intent = classification.get("intent", "single_hop")

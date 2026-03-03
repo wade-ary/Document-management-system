@@ -28,6 +28,11 @@ def _get_metadata_collection():
     return get_db(DB_NAME)["metadata"]
 
 
+def _get_review_queue_collection():
+    """Collection for ingestion review queue (incomplete / failed extraction)."""
+    return get_db(DB_NAME)["ingestion_review_queue"]
+
+
 def _get_actions_collection():
     return get_db(DB_NAME)["actions"]
 
@@ -69,8 +74,19 @@ def upload_file(
         logger.exception("GridFS put failed: %s", e)
         return None, 500
 
-    # 2. Extract text (PDF / TXT)
-    extracted_text = extract_text_from_file(data, filename=filename, content_type=content_type)
+    # 2. Extract text (PDF / TXT) — never block ingestion on failure
+    extraction_failed = False
+    try:
+        extracted_text = extract_text_from_file(data, filename=filename, content_type=content_type)
+        if not extracted_text or not str(extracted_text).strip():
+            ext = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+            if ext in ("pdf", "txt") or (content_type and ("pdf" in content_type or "text" in content_type)):
+                extraction_failed = True
+            extracted_text = extracted_text or ""
+    except Exception as e:
+        logger.warning("Text extraction failed (ingestion continues): %s", e)
+        extracted_text = ""
+        extraction_failed = True
 
     # 3. Persist metadata
     metadata = {
@@ -87,6 +103,10 @@ def upload_file(
         "extracted_text": extracted_text,
         "upload_date": datetime.utcnow().isoformat(),
     }
+    if extraction_failed:
+        metadata["ingestion_status"] = "incomplete"
+        metadata["metadata_incomplete"] = True
+        metadata["in_review_queue"] = True
     if uploaded_by is not None:
         metadata["uploaded_by"] = uploaded_by
     if deadline is not None:
@@ -104,7 +124,18 @@ def upload_file(
             pass
         return None, 500
 
-    # 4. Add to search indexes (FAISS, TF-IDF, BM25)
+    # Send to dashboard review queue when extraction failed
+    if extraction_failed:
+        try:
+            _get_review_queue_collection().insert_one({
+                "file_id": file_id,
+                "reason": "metadata_extraction_failed",
+                "created_at": datetime.utcnow().isoformat(),
+            })
+        except Exception as e:
+            logger.warning("Failed to add to review queue: %s", e)
+
+    # 4. Add to search indexes (FAISS, TF-IDF, BM25) — only when we have text
     if extracted_text and extracted_text.strip():
         try:
             add_document_to_indexes(file_id, extracted_text)
@@ -121,6 +152,7 @@ def upload_file(
             )
         except Exception as e:
             logger.warning("Compliance processing failed (document still saved): %s", e)
+    # When extraction failed we never block: document is stored and marked for review.
 
     return file_id, 200
 
@@ -136,6 +168,7 @@ def list_dir(path: str) -> List[Dict[str, Any]]:
     prefix = (path + "/").replace("//", "/")
     all_docs = list(coll.find({"path": {"$regex": f"^{re.escape(prefix)}[^/]+$"}}, {"path": 1}))
     seen = set()
+    result: List[Dict[str, Any]] = []
     for d in all_docs:
         p = d.get("path", "")
         if "/" in p:
