@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import React, { useState } from 'react';
 import { Search, FileText, Calendar, X } from 'lucide-react';
-import API_BASE_URL from '../config/api';
-import { toast } from 'react-hot-toast';
+import { API_ENDPOINTS } from '@/config/api';
+import { toast } from 'react-toastify';
 
 interface PrecedentResult {
   file_id: string;
@@ -42,7 +42,7 @@ const PrecedentFinder: React.FC<PrecedentFinderProps> = ({
   const searchPrecedents = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/find-precedents`, {
+      const response = await fetch(API_ENDPOINTS.PRECEDENTS, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

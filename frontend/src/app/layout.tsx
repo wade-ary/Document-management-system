@@ -27,8 +27,8 @@ export default function RootLayout({
     <ClerkProvider
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
-      afterSignInUrl="/directory"
-      afterSignUpUrl="/directory"
+      afterSignInUrl="/"
+      afterSignUpUrl="/"
     >
       <html lang="en">
         <head>

@@ -7,10 +7,8 @@ import Link from "next/link";
 import Image from "next/image";
 // Use public folder path for Next.js static images
 import UserMenuDropdown from "./UserMenuDropdown";
-import NotificationBell from "./discussions/NotificationBell";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
-import { getRoleDisplayName, getRoleBadgeColor } from "@/utils/roleUtils";
 // import useMuteStore from "@/store/muteStore";
 
 // Page descriptions for screen reader navigation
@@ -47,8 +45,8 @@ function NavbarComponent() {
   const router = useRouter();
   const navRef = useRef(null);
 
-  const menuItems = useMemo(() => ["Home", "Directory", "Dashboard", "Departments", "Compliance", "Circulars"], []);
-  const menuPaths = useMemo(() => ["/", "/directory", "/dashboard", "/departments", "/compliance", "/circulars"], []);
+  const menuItems = useMemo(() => ["Query", "Compliance"], []);
+  const menuPaths = useMemo(() => ["/", "/compliance"], []);
 
   useEffect(() => {
     // Add the Google Translate script dynamically
@@ -186,7 +184,7 @@ function NavbarComponent() {
           </div>
 
           {/* Desktop Menu */}
-          <div 
+          <div
             className="hidden sm:flex sm:items-center sm:space-x-8"
             aria-label="Desktop Navigation Menu"
           >
@@ -203,14 +201,6 @@ function NavbarComponent() {
                 {item}
               </Link>
             ))}
-            <Link
-              href="/document-chat"
-              className={`text-sm font-medium border border-green-500 rounded-lg px-3 py-1.5 ml-2 text-green-700 hover:bg-green-50 transition-all duration-200 flex items-center gap-1 ${pathname === '/document-chat' ? 'bg-green-100 !font-semibold' : ''}`}
-              aria-label="Navigate to Compliance Chat page"
-            >
-              {/* <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 8h2a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2v-8a2 2 0 012-2h2M15 3h-6a2 2 0 00-2 2v4a2 2 0 002 2h6a2 2 0 002-2V5a2 2 0 00-2-2z" /></svg> */}
-              Document Chat
-            </Link>
           </div>
 
           {/* Right Side */}
@@ -251,10 +241,6 @@ function NavbarComponent() {
             ) : (
               <>
                 <div className="flex justify-center items-center space-x-4">
-                  {/* Notification Bell for Discussion Mentions */}
-                  <NotificationBell />
-                  
-                  {/* Combined User Menu Dropdown with Profile, Accessibility, and Log Out */}
                   <UserMenuDropdown />
                 </div>
               </>
@@ -281,13 +267,6 @@ function NavbarComponent() {
                 {item}
               </Link>
             ))}
-            <Link
-              href="/document-chat"
-              className="text-sm font-medium text-green-700 border border-green-500 rounded-lg px-3 py-2 mt-1 block hover:bg-green-50 transition-all duration-200"
-              aria-label="Navigate to Compliance Chat page"
-            >
-              Document Chat
-            </Link>
           </div>
         </div>
       )}
