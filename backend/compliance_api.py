@@ -432,8 +432,81 @@ def process_file_for_compliance(
     return compliance_result
 
 
+def get_compliance_dashboard(
+    department: Optional[str] = None,
+    risk_level: Optional[str] = None,
+    urgent_only: bool = False,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """
+    Fetch documents that need attention for the compliance dashboard:
+    high risk, urgent deadline (overdue or within 7 days), regulatory.
+    """
+    comp_coll = _get_compliance_collection()
+    meta_coll = _get_metadata_collection()
+    query: Dict[str, Any] = {}
+    if department:
+        query["department"] = {"$regex": department, "$options": "i"}
+    if risk_level:
+        query["compliance.riskLevel"] = risk_level
+    cursor = comp_coll.find(query).sort("compliance.extractedDate", -1).limit(limit * 2)
+    docs = list(cursor)
+    if not docs:
+        q: Dict[str, Any] = {"compliance": {"$exists": True, "$ne": None}}
+        if department:
+            q["department"] = {"$regex": department, "$options": "i"}
+        for d in meta_coll.find(q, {"file_id": 1, "name": 1, "path": 1, "upload_date": 1, "department": 1, "compliance": 1, "summary": 1, "is_regulatory": 1}).sort("compliance.extractedDate", -1).limit(limit * 2):
+            comp = d.get("compliance") or {}
+            if risk_level and comp.get("riskLevel") != risk_level:
+                continue
+            docs.append({"file_id": d.get("file_id"), "filename": d.get("name"), "path": d.get("path"), "upload_date": d.get("upload_date"), "department": d.get("department"), "summary": d.get("summary"), "is_regulatory": d.get("is_regulatory"), "compliance": comp})
+    from datetime import date, timedelta
+    def _to_item(d: Dict) -> Dict:
+        comp = d.get("compliance") or {}
+        return {"file_id": d.get("file_id"), "filename": d.get("filename") or d.get("name"), "path": d.get("path", ""), "upload_date": d.get("upload_date", ""), "department": d.get("department", ""), "summary": ((d.get("summary") or comp.get("summary")) or "")[:500], "risk_level": comp.get("riskLevel", ""), "deadline": comp.get("deadline", ""), "is_regulatory": d.get("is_regulatory", False), "title": comp.get("title", ""), "issuing_authority": comp.get("issuingAuthority", ""), "keywords": (comp.get("keywords") or [])[:10], "risk_matrix": comp.get("riskMatrix"), "radar_chart": comp.get("radarChart"), "scores": comp.get("scores")}
+    items = [_to_item(d) for d in docs]
+    today = date.today()
+    urgent_cutoff = today + timedelta(days=7)
+    def _is_urgent(item: Dict) -> bool:
+        dl = item.get("deadline")
+        if not dl or not isinstance(dl, str):
+            return False
+        try:
+            return date.fromisoformat(dl[:10]) <= urgent_cutoff
+        except Exception:
+            return False
+    high_risk = [i for i in items if (i.get("risk_level") or "").lower() == "high"]
+    medium_risk = [i for i in items if (i.get("risk_level") or "").lower() == "medium"]
+    urgent = [i for i in items if _is_urgent(i)]
+    regulatory = [i for i in items if i.get("is_regulatory")]
+    needs_attention_ids = {i.get("file_id") for i in high_risk + urgent + regulatory}
+    needs_attention = [i for i in items if i.get("file_id") in needs_attention_ids]
+    needs_attention.sort(key=lambda x: (0 if _is_urgent(x) else 1, 0 if (x.get("risk_level") or "").lower() == "high" else 1, 0 if x.get("is_regulatory") else 1, x.get("file_id", "")))
+    if urgent_only:
+        items = urgent
+    elif risk_level:
+        items = [i for i in items if (i.get("risk_level") or "").lower() == risk_level.lower()]
+    items = items[:limit]
+    return {"summary": {"total_with_compliance": len(items), "high_risk_count": len(high_risk), "medium_risk_count": len(medium_risk), "urgent_deadline_count": len(urgent), "regulatory_count": len(regulatory), "needs_attention_count": len(needs_attention)}, "needs_attention": needs_attention[:50], "high_risk": high_risk[:30], "urgent_deadline": urgent[:30], "regulatory": regulatory[:30], "items": items}
+
+
 def register_compliance_routes(app) -> None:
-    """Placeholder for additional compliance-specific routes."""
-    # In future we can expose dashboard/data endpoints here.
-    return None
+    """Register compliance dashboard route."""
+    from flask import jsonify
+    @app.route("/api/compliance/dashboard", methods=["GET", "POST"])
+    def compliance_dashboard():
+        try:
+            data = request.get_json(silent=True) if request.method == "POST" else request.args
+            if data is None:
+                data = {}
+            result = get_compliance_dashboard(
+                department=data.get("department"),
+                risk_level=data.get("risk_level"),
+                urgent_only=bool(data.get("urgent_only", False)),
+                limit=min(int(data.get("limit", 100)), 200),
+            )
+            return jsonify(result), 200
+        except Exception as e:
+            logger.exception("compliance_dashboard: %s", e)
+            return jsonify({"error": str(e)}), 500
 

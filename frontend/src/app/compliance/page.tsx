@@ -38,6 +38,72 @@ import SmartPriorityWidget from '@/components/SmartPriorityWidget';
 import RadarChart from '@/components/compliance/RadarChart';
 import { API_ENDPOINTS } from '@/config/api';
 
+/** Dashboard API response shape */
+interface DashboardSummary {
+  total_with_compliance: number;
+  high_risk_count: number;
+  medium_risk_count: number;
+  urgent_deadline_count: number;
+  regulatory_count: number;
+  needs_attention_count: number;
+}
+
+interface DashboardItem {
+  file_id: string;
+  filename: string;
+  path: string;
+  upload_date: string;
+  department: string;
+  summary: string;
+  risk_level: string;
+  deadline: string;
+  is_regulatory: boolean;
+  title: string;
+  issuing_authority: string;
+  keywords: string[];
+  risk_matrix?: ComplianceItem['riskMatrix'];
+  radar_chart?: ComplianceItem['radarChart'];
+  scores?: Record<string, unknown>;
+}
+
+interface DashboardResponse {
+  summary: DashboardSummary;
+  needs_attention: DashboardItem[];
+  high_risk: DashboardItem[];
+  urgent_deadline: DashboardItem[];
+  regulatory: DashboardItem[];
+  items: DashboardItem[];
+}
+
+function mapDashboardItemToCompliance(item: DashboardItem): ComplianceItem {
+  const deadline = item.deadline || '';
+  const deadlineDate = deadline ? new Date(deadline) : null;
+  const now = new Date();
+  let status: ComplianceItem['status'] = 'pending';
+  if (deadlineDate && deadlineDate < now) status = 'overdue';
+
+  return {
+    id: item.file_id || '',
+    title: item.title || item.filename || 'Untitled',
+    source: item.issuing_authority || 'Unknown',
+    deadline,
+    riskLevel: (item.risk_level?.toLowerCase() || 'low') as 'high' | 'medium' | 'low',
+    status,
+    department: item.department || 'General',
+    description: item.summary || '',
+    extractedDate: item.upload_date || '',
+    keywords: Array.isArray(item.keywords) ? item.keywords : [],
+    documentUrl: item.path ? `/view?path=${encodeURIComponent(item.path)}` : undefined,
+    riskMatrix: item.risk_matrix,
+    radarChart: item.radar_chart,
+  };
+}
+
+function mapDashboardResponse(data: DashboardResponse): ComplianceItem[] {
+  const items = data.items ?? [];
+  return items.map(mapDashboardItemToCompliance);
+}
+
 interface ComplianceItem {
   id: string;
   title: string;
