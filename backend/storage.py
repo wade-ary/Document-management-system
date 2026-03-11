@@ -234,6 +234,15 @@ def delete_file(file_name: str, path: str) -> tuple:
     return {"message": "File deleted"}, 200
 
 
+def delete_file_by_id(file_id: str) -> tuple:
+    """Delete file from metadata and GridFS by file_id. Returns (result_dict, status_code)."""
+    coll = _get_metadata_collection()
+    doc = coll.find_one({"file_id": file_id})
+    if not doc:
+        return {"error": "Document not found"}, 404
+    return delete_file(doc["name"], doc["path"])
+
+
 def move_file(file_name: str, current_path: str, new_path: str) -> tuple:
     """Update path in metadata."""
     coll = _get_metadata_collection()

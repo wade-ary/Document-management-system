@@ -41,29 +41,21 @@ export default function QueryPage() {
     setBlurbTaskId(null);
     setSystemDown(false);
     try {
-      const res = await fetch(API_ENDPOINTS.QUERY, {
+      const res = await fetch(API_ENDPOINTS.QUERY_SEARCH, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q }),
+        body: JSON.stringify({ query: q, top_k: 50 }),
       });
       const data = await res.json();
-      if (res.status === 503 && data.code === "SEARCH_SYSTEM_DOWN") {
-        setSystemDown(true);
-        toast.error(data.error || "Search temporarily unavailable.");
-        return;
-      }
       if (!res.ok) {
         toast.error(data.error || "Query failed");
         return;
       }
       setResults(data.results || []);
-      setIntent(data.intent || null);
-      setReasoning(data.reasoning || null);
-      setBlurbTaskId(data.blurb_task_id || null);
+      setIntent(null);
+      setReasoning(null);
+      setBlurbTaskId(null);
       setBlurb(null);
-      if (data.blurb_task_id) {
-        pollBlurb(data.blurb_task_id);
-      }
     } catch (e) {
       toast.error("Request failed");
       console.error(e);

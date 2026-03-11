@@ -42,7 +42,7 @@ const PrecedentFinder: React.FC<PrecedentFinderProps> = ({
   const searchPrecedents = async () => {
     setLoading(true);
     try {
-      const response = await fetch(API_ENDPOINTS.PRECEDENTS, {
+      const response = await fetch(API_ENDPOINTS.DOC_SEARCH, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

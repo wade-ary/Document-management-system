@@ -1,4 +1,4 @@
-// API Configuration — only endpoints used by Query page, Precedent Finder, and Compliance dashboard
+// API Configuration — only the six document API endpoints
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -7,19 +7,23 @@ const API_BASE_URL =
     : "http://127.0.0.1:5000");
 
 export const API_ENDPOINTS = {
-  // Query + retrieval
-  QUERY: `${API_BASE_URL}/api/query`,
-  BLURB: `${API_BASE_URL}/api/blurb`,
-  PRECEDENTS: `${API_BASE_URL}/api/precedents`,
+  // Standard ingestion pipeline for docs
+  INGEST: `${API_BASE_URL}/api/ingest`,
 
-  // Compliance dashboard
-  COMPLIANCE_DASHBOARD: `${API_BASE_URL}/api/compliance/dashboard`,
-  COMPLIANCE_UPLOAD: `${API_BASE_URL}/api/compliance/upload`,
+  // Retrieval using a query
+  QUERY_SEARCH: `${API_BASE_URL}/api/query_search`,
 
-  // File (for viewing / listing if needed)
-  VIEW_FILE: `${API_BASE_URL}/view_file`,
-  LIST_DIR: `${API_BASE_URL}/listdir`,
-  UPLOAD: `${API_BASE_URL}/upload`,
+  // Document precedent finder — query using a doc
+  DOC_SEARCH: `${API_BASE_URL}/api/doc_search`,
+
+  // Retrieve docs using hard filters in metadata
+  RETRIEVE_HARD_FILTERS: `${API_BASE_URL}/api/retrieve_hard_filters`,
+
+  // Update anything about the doc
+  UPDATE: `${API_BASE_URL}/api/update`,
+
+  // Delete a doc from all places
+  DELETE: `${API_BASE_URL}/api/delete`,
 } as const;
 
 export { API_BASE_URL as default };
