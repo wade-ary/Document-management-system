@@ -264,8 +264,13 @@ class SearchEngine:
             return out
 
         # FAISS: by similarity descending -> rank 1, 2, ...
+        # Soft fail: if embedding fails for query, use lexical only (no FAISS list)
         if FAISS_AVAILABLE and self.faiss_index is not None and self.faiss_file_ids:
-            emb = get_embedding(q)
+            emb = None
+            try:
+                emb = get_embedding(q)
+            except Exception as e:
+                logger.warning("Embedding generation failed for query (using lexical only): %s", e)
             if emb is not None:
                 vec = np.array([emb], dtype=np.float32)
                 faiss.normalize_L2(vec)
@@ -276,6 +281,8 @@ class SearchEngine:
                     if 0 <= idx < len(self.faiss_file_ids):
                         fid = self.faiss_file_ids[idx]
                         out["faiss"].append((fid, rank))
+            else:
+                logger.info("Query embedding unavailable; using lexical indexes only.")
 
         # TF-IDF: by score descending -> rank 1, 2, ...
         if self.tfidf_vectorizer is not None and self.tfidf_matrix is not None:

@@ -2,6 +2,11 @@
 Precedent Finder: find historical documents similar to a given document.
 Treats the document as the query and runs the same retrieval pipeline (embed, RRF, filter, fuzzy rerank),
 then optionally boosts by document-type and structural similarity.
+
+Soft failures (same as query_search; handled in search/retrieval):
+- Partial index failure: FAISS or lexical fails → use whichever index responds (get_ranked_lists returns partial).
+- Reranker timeout: _fuzzy_rerank_with_timeout returns fused order without full rerank.
+- Embedding generation failure: get_ranked_lists uses lexical only (search.py).
 """
 from __future__ import annotations
 
@@ -14,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from backend.db import get_db
 from backend.retrieval import (
     _apply_metadata_filters,
-    _fuzzy_rerank,
+    _fuzzy_rerank_with_timeout,
     _reciprocal_rank_fusion,
 )
 from backend.search import get_search_engine
@@ -173,7 +178,10 @@ def find_precedents(
         if not filtered:
             return {"results": [], "total_found": 0, "current_document": _current_doc_info(current_doc)}
 
-        reranked = _fuzzy_rerank(filtered[:PRECEDENT_RERANK_TOP], query, top_k=PRECEDENT_FINAL_TOP_K)
+        # Soft: reranker timeout → return fused order without full rerank
+        reranked = _fuzzy_rerank_with_timeout(
+            filtered[:PRECEDENT_RERANK_TOP], query, top_k=PRECEDENT_FINAL_TOP_K
+        )
         reranked_ids = {r["file_id"] for r in reranked}
         rest = [x for x in filtered if x["file_id"] not in reranked_ids][: max(0, top_k - len(reranked))]
         candidates = (reranked + rest)[:top_k]

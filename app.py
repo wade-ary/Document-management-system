@@ -19,8 +19,20 @@ from werkzeug.exceptions import HTTPException
 from backend.db import MongoDB
 from backend.storage import upload_file, delete_file_by_id
 from backend.ingest_errors import IngestHardFailureError
+from backend.query_errors import (
+    QueryHardFailureError,
+    MSG_EMPTY_QUERY,
+    MSG_BOTH_INDEXES_UNAVAILABLE,
+    MSG_INVALID_FILTER_PARAMS,
+    MSG_UNAUTHORIZED_QUERY,
+    MSG_REQUEST_TOO_LARGE,
+    MSG_DB_CONNECTION,
+)
+from backend.query_search_validation import validate_query_filters, validate_retrieve_hard_filters_params
+from backend.guardrails import get_search_availability
 from backend.search import rebuild_search_indexes
-from backend.retrieval import single_hop_retrieval
+from backend.retrieval import single_hop_retrieval, multi_hop_retrieval
+from backend.query_classifier import classify_query, DEFAULT_INTENT_QUERY_SEARCH
 from backend.precedent_finder import find_precedents
 from backend.search_init import init_search_engine
 
@@ -48,6 +60,10 @@ except Exception as e:
     logger.exception("Search engine init failed: %s", e)
 
 ALLOWED_EXTENSIONS = {"txt", "docx", "pdf", "md", "ppt", "pptx", "png", "jpg", "jpeg"}
+
+# Query search limits (hard failure if exceeded)
+MAX_QUERY_LENGTH = 10_000
+MAX_QUERY_REQUEST_BODY_BYTES = 500_000
 
 
 def _allowed_file(filename):
@@ -136,27 +152,78 @@ def api_ingest():
 
 # ---------------------------------------------------------------------------
 # 2. query_search — retrieval using a query
+# Hard failures: empty query, both indexes unavailable, invalid filters, unauthorized, request too large.
+# Soft failures: index partial (use available), reranker timeout (fused only), few candidates (expand+rerun),
+#                classification failure (multi-hop), metadata parse failure (ignore filter), embedding failure (lexical only).
 # ---------------------------------------------------------------------------
 @app.route("/api/query_search", methods=["POST"])
 def api_query_search():
     """
     Retrieve documents by semantic/keyword search.
-    Body: { "query": str (required), "top_k": int?, "filters": { date_from?, date_to?, department?, file_types? } }
+    Body: { "query": str (required), "top_k": int?, "filters": { date_from?, date_to?, department?, file_types? }, "user_id"?, "allowed_departments"? }
     """
     try:
+        # --- Hard: request size ---
+        body = request.get_data()
+        if len(body) > MAX_QUERY_REQUEST_BODY_BYTES:
+            raise QueryHardFailureError(MSG_REQUEST_TOO_LARGE)
         data = request.get_json() or {}
         query = (data.get("query") or "").strip()
+
+        # --- Hard: empty query ---
         if not query:
-            return jsonify({"error": "query is required"}), 400
+            raise QueryHardFailureError(MSG_EMPTY_QUERY)
+        if len(query) > MAX_QUERY_LENGTH:
+            raise QueryHardFailureError(MSG_REQUEST_TOO_LARGE)
+
+        # --- Hard: both indexes unavailable ---
+        availability = get_search_availability()
+        if availability.get("status") == "down":
+            raise QueryHardFailureError(
+                availability.get("message", MSG_BOTH_INDEXES_UNAVAILABLE)
+            )
+
+        # --- Hard: invalid filter parameters ---
+        raw_filters = data.get("filters") or {}
+        try:
+            filters = validate_query_filters(raw_filters) if raw_filters else None
+        except QueryHardFailureError:
+            raise
+        # Soft: metadata parsing failure (from query) — if we had query-derived filters and they failed, we would ignore and run general search (no impl yet)
+        # if filters is None due to parse failure from query text, we already run without filters here.
+
+        # --- Hard: unauthorized (user requesting docs outside permission scope) ---
+        user_id = data.get("user_id")
+        allowed_departments = data.get("allowed_departments")
+        if user_id and allowed_departments is not None and isinstance(allowed_departments, list):
+            req_dept = (raw_filters.get("department") or (raw_filters.get("departments") or [None])[0] if isinstance(raw_filters.get("departments"), list) else None) or raw_filters.get("department")
+            if req_dept is not None and str(req_dept).strip() and str(req_dept).strip().lower() not in [str(d).strip().lower() for d in allowed_departments]:
+                raise QueryHardFailureError(MSG_UNAUTHORIZED_QUERY)
+
         top_k = max(1, min(int(data.get("top_k", 50)), 200))
-        filters = data.get("filters") or {}
-        docs = single_hop_retrieval(
-            query=query,
-            metadata_collection=metadata_collection,
-            filters=filters if filters else None,
-            final_top_k=top_k,
-        )
+
+        # --- Soft: query classification failure -> default to multi-hop ---
+        classification = classify_query(query, default_on_failure=DEFAULT_INTENT_QUERY_SEARCH)
+        intent = classification.get("intent", "multi_hop")
+
+        # Run retrieval (soft: index partial, reranker timeout, few candidates, embedding failure are handled inside retrieval/search)
+        if intent == "multi_hop":
+            docs = multi_hop_retrieval(
+                query=query,
+                metadata_collection=metadata_collection,
+                filters=filters,
+                final_top_k=top_k,
+            )
+        else:
+            docs = single_hop_retrieval(
+                query=query,
+                metadata_collection=metadata_collection,
+                filters=filters,
+                final_top_k=top_k,
+            )
         return jsonify({"results": docs, "count": len(docs)}), 200
+    except QueryHardFailureError as e:
+        return jsonify({"error": e.message}), 400
     except Exception as e:
         logger.exception("query_search: %s", e)
         return jsonify({"error": str(e)}), 500
@@ -164,6 +231,7 @@ def api_query_search():
 
 # ---------------------------------------------------------------------------
 # 3. doc_search — document precedent finder (query using a doc)
+# Same corpus as query_search (ingested docs). Hard: both indexes unavailable. Soft: partial index, reranker timeout, embedding failure.
 # ---------------------------------------------------------------------------
 @app.route("/api/doc_search", methods=["POST"])
 def api_doc_search():
@@ -176,6 +244,14 @@ def api_doc_search():
         file_id = (data.get("file_id") or "").strip()
         if not file_id:
             return jsonify({"error": "file_id is required"}), 400
+
+        # --- Hard: both indexes unavailable ---
+        availability = get_search_availability()
+        if availability.get("status") == "down":
+            raise QueryHardFailureError(
+                availability.get("message", MSG_BOTH_INDEXES_UNAVAILABLE)
+            )
+
         top_k = max(1, min(int(data.get("top_k", 50)), 200))
         file_types = data.get("file_types")
         date_range = data.get("date_range")
@@ -193,6 +269,8 @@ def api_doc_search():
         if result.get("error"):
             return jsonify(result), 404
         return jsonify(result), 200
+    except QueryHardFailureError as e:
+        return jsonify({"error": e.message}), 400
     except Exception as e:
         logger.exception("doc_search: %s", e)
         return jsonify({"error": str(e)}), 500
@@ -200,6 +278,7 @@ def api_doc_search():
 
 # ---------------------------------------------------------------------------
 # 4. retrieve_hard_filters — retrieve docs using hard filters on metadata
+# Hard failures only: invalid params, MongoDB/GridFS connection error.
 # ---------------------------------------------------------------------------
 @app.route("/api/retrieve_hard_filters", methods=["POST"])
 def api_retrieve_hard_filters():
@@ -209,47 +288,33 @@ def api_retrieve_hard_filters():
     """
     try:
         data = request.get_json() or {}
-        filters = data.get("filters") or {}
-        limit = max(1, min(int(data.get("limit", 500)), 1000))
-        exclude_text = data.get("exclude_extracted_text", True)
 
-        mongo_filter = {}
-        if filters.get("department"):
-            mongo_filter["department"] = filters["department"]
-        if filters.get("path"):
-            mongo_filter["path"] = filters["path"]
-        if filters.get("user_id"):
-            mongo_filter["user_id"] = filters["user_id"]
-        if filters.get("approvalStatus"):
-            mongo_filter["approvalStatus"] = filters["approvalStatus"]
-        if filters.get("visible") is not None:
-            mongo_filter["visible"] = bool(filters["visible"])
+        # --- Hard: invalid params ---
+        try:
+            mongo_filter, limit, projection = validate_retrieve_hard_filters_params(data)
+        except QueryHardFailureError:
+            raise
 
-        if filters.get("date_from") or filters.get("date_to"):
-            mongo_filter["upload_date"] = {}
-            if filters.get("date_from"):
-                mongo_filter["upload_date"]["$gte"] = filters["date_from"]
-            if filters.get("date_to"):
-                mongo_filter["upload_date"]["$lte"] = filters["date_to"]
+        # --- Hard: database (Mongo/GridFS) connection ---
+        try:
+            cursor = metadata_collection.find(mongo_filter, projection).limit(limit)
+            docs = list(cursor)
+        except Exception as e:
+            try:
+                import pymongo.errors
+                if isinstance(e, (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure, pymongo.errors.ExecutionTimeout)):
+                    raise QueryHardFailureError(MSG_DB_CONNECTION)
+            except ImportError:
+                pass
+            logger.exception("retrieve_hard_filters DB error: %s", e)
+            raise
 
-        if filters.get("file_types"):
-            exts = [e.replace(".", "").lower() for e in filters["file_types"]]
-            mongo_filter["name"] = {"$regex": r"\.(" + "|".join(re.escape(e) for e in exts) + r")$", "$options": "i"}
-
-        if filters.get("tags"):
-            tags = filters["tags"] if isinstance(filters["tags"], list) else [filters["tags"]]
-            mongo_filter["tags"] = {"$in": tags}
-
-        projection = None
-        if exclude_text:
-            projection = {"extracted_text": 0}
-
-        cursor = metadata_collection.find(mongo_filter, projection).limit(limit)
-        docs = list(cursor)
         for d in docs:
             if "_id" in d:
                 d["_id"] = str(d["_id"])
         return jsonify({"results": docs, "count": len(docs)}), 200
+    except QueryHardFailureError as e:
+        return jsonify({"error": e.message}), 400
     except Exception as e:
         logger.exception("retrieve_hard_filters: %s", e)
         return jsonify({"error": str(e)}), 500

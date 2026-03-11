@@ -10,7 +10,12 @@ Pipeline for both:
 
 Single-hop: smaller N, fewer candidates, lighter reranking.
 Multi-hop: larger N, more candidates, full fuzzy reranking.
-Not connected to API yet; call single_hop_retrieval / multi_hop_retrieval directly.
+
+Soft failures (handled inside pipeline):
+- Index partial failure: FAISS or lexical fails → RRF uses whichever index responds (get_ranked_lists returns partial).
+- Reranker timeout: _fuzzy_rerank_with_timeout returns fused results without reranking.
+- Too few candidates after metadata filtering: single_hop/multi_hop rerun with higher N (expand pool and rerun).
+- Embedding failure for query: handled in search.get_ranked_lists → lexical only.
 """
 from __future__ import annotations
 

@@ -21,6 +21,9 @@ Intent = Literal["single_hop", "multi_hop"]
 
 DEFAULT_INTENT: Intent = "single_hop"
 
+# When query_search wants to default to multi-hop on classification failure
+DEFAULT_INTENT_QUERY_SEARCH: Intent = "multi_hop"
+
 CLASSIFY_SYSTEM = """You are a query classifier for a document retrieval system.
 
 Given a user question, classify it into exactly one of:
@@ -114,9 +117,12 @@ def _parse_response(raw: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def classify_query(query: str) -> Dict[str, Any]:
+def classify_query(query: str, default_on_failure: Optional[Intent] = None) -> Dict[str, Any]:
     """
     Classify a user query into single_hop or multi_hop.
+
+    default_on_failure: if set, use this when LLM/parse fails (e.g. "multi_hop" for query_search).
+    Otherwise uses DEFAULT_INTENT ("single_hop").
 
     Returns:
         {
@@ -125,8 +131,9 @@ def classify_query(query: str) -> Dict[str, Any]:
         }
     """
     query = (query or "").strip()
+    fallback = default_on_failure if default_on_failure in ("single_hop", "multi_hop") else DEFAULT_INTENT
     if not query:
-        return {"intent": DEFAULT_INTENT, "reasoning": "Empty query; defaulting to single_hop."}
+        return {"intent": fallback, "reasoning": "Empty query; defaulting."}
 
     raw = _call_llm(query)
     parsed = _parse_response(raw) if raw else None
@@ -134,5 +141,6 @@ def classify_query(query: str) -> Dict[str, Any]:
     if parsed:
         return parsed
 
-    logger.info("Query classification fallback to %s for: %s", DEFAULT_INTENT, query[:80])
-    return {"intent": DEFAULT_INTENT, "reasoning": "LLM unavailable or parse failed; defaulting to single_hop."}
+    # Soft fail: classification failed -> use fallback (e.g. multi_hop for query_search)
+    logger.info("Query classification fallback to %s for: %s", fallback, query[:80])
+    return {"intent": fallback, "reasoning": "LLM unavailable or parse failed; defaulting to %s." % fallback}
