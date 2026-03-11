@@ -27,6 +27,12 @@ from backend.query_errors import (
     MSG_UNAUTHORIZED_QUERY,
     MSG_REQUEST_TOO_LARGE,
     MSG_DB_CONNECTION,
+    MSG_UPDATE_FIELD_EMPTY,
+    MSG_UPDATE_FIELD_INVALID,
+    MSG_UPDATE_NO_PERMISSION,
+    MSG_DELETE_DB_CONNECTION,
+    MSG_DELETE_FILE_NOT_FOUND,
+    MSG_DELETE_NO_PERMISSION,
 )
 from backend.query_search_validation import validate_query_filters, validate_retrieve_hard_filters_params
 from backend.guardrails import get_search_availability
@@ -322,6 +328,7 @@ def api_retrieve_hard_filters():
 
 # ---------------------------------------------------------------------------
 # 5. update — update anything about the doc (metadata)
+# Hard failures: field empty (file_id), field invalid value, no permission (TBD placeholder).
 # ---------------------------------------------------------------------------
 @app.route("/api/update", methods=["POST", "PUT"])
 def api_update():
@@ -332,17 +339,35 @@ def api_update():
     """
     try:
         data = request.get_json() or {}
+
+        # --- Hard: field cannot be empty (file_id) ---
         file_id = (data.get("file_id") or "").strip()
-        updates = data.get("updates")
         if not file_id:
-            return jsonify({"error": "file_id is required"}), 400
+            raise QueryHardFailureError(MSG_UPDATE_FIELD_EMPTY)
+
+        updates = data.get("updates")
         if not updates or not isinstance(updates, dict):
-            return jsonify({"error": "updates object is required"}), 400
+            raise QueryHardFailureError("updates cannot be empty.")
 
         disallow = {"_id", "file_id"}
-        set_dict = {k: v for k, v in updates.items() if k not in disallow}
+        set_dict = {}
+        for k, v in updates.items():
+            if k in disallow:
+                continue
+            # --- Hard: field cannot have invalid value ---
+            if v is None:
+                raise QueryHardFailureError(MSG_UPDATE_FIELD_INVALID.format(k))
+            if isinstance(v, (str, int, float, bool, list, dict)):
+                set_dict[k] = v
+            else:
+                raise QueryHardFailureError(MSG_UPDATE_FIELD_INVALID.format(k))
         if not set_dict:
-            return jsonify({"error": "No allowed fields to update"}), 400
+            raise QueryHardFailureError(MSG_UPDATE_FIELD_INVALID.format("updates"))
+
+        # --- Hard: don't have permission to update given doc (TBD placeholder) ---
+        # TODO: implement permission check (e.g. user_id / allowed_roles in request; verify user can update this file_id)
+        # if not _can_update_document(user_id=data.get("user_id"), file_id=file_id):
+        #     raise QueryHardFailureError(MSG_UPDATE_NO_PERMISSION)
 
         result = metadata_collection.update_one(
             {"file_id": file_id},
@@ -351,6 +376,8 @@ def api_update():
         if result.matched_count == 0:
             return jsonify({"error": "Document not found"}), 404
         return jsonify({"message": "Document updated", "file_id": file_id}), 200
+    except QueryHardFailureError as e:
+        return jsonify({"error": e.message}), 400
     except Exception as e:
         logger.exception("update: %s", e)
         return jsonify({"error": str(e)}), 500
@@ -358,6 +385,7 @@ def api_update():
 
 # ---------------------------------------------------------------------------
 # 6. delete — delete a doc from all places (metadata, GridFS, search indexes)
+# Hard failures: failed to connect to DB, file doesn't exist, don't have permission (TBD placeholder).
 # ---------------------------------------------------------------------------
 @app.route("/api/delete", methods=["POST", "DELETE"])
 def api_delete():
@@ -371,12 +399,44 @@ def api_delete():
         if not file_id:
             return jsonify({"error": "file_id is required"}), 400
 
-        result, status_code = delete_file_by_id(file_id)
-        if status_code != 200:
-            return jsonify(result), status_code
+        # --- Hard: don't have permission to delete (TBD placeholder) ---
+        # TODO: implement permission check (e.g. user_id in request; verify user can delete this file_id)
+        # if not _can_delete_document(user_id=data.get("user_id"), file_id=file_id):
+        #     raise QueryHardFailureError(MSG_DELETE_NO_PERMISSION)
 
-        rebuild_search_indexes(metadata_collection=metadata_collection)
+        # --- Hard: failed to connect to DB; file doesn't exist ---
+        try:
+            result, status_code = delete_file_by_id(file_id)
+        except Exception as e:
+            try:
+                import pymongo.errors
+                if isinstance(e, (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure, pymongo.errors.ExecutionTimeout)):
+                    raise QueryHardFailureError(MSG_DELETE_DB_CONNECTION)
+            except ImportError:
+                pass
+            logger.exception("delete DB error: %s", e)
+            raise
+
+        if status_code == 404:
+            return jsonify({"error": MSG_DELETE_FILE_NOT_FOUND}), 404
+        if status_code != 200:
+            return jsonify({"error": result.get("error", "Delete failed")}), status_code
+
+        try:
+            rebuild_search_indexes(metadata_collection=metadata_collection)
+        except Exception as e:
+            try:
+                import pymongo.errors
+                if isinstance(e, (pymongo.errors.ServerSelectionTimeoutError, pymongo.errors.ConnectionFailure, pymongo.errors.ExecutionTimeout)):
+                    raise QueryHardFailureError(MSG_DELETE_DB_CONNECTION)
+            except ImportError:
+                pass
+            logger.exception("delete rebuild_index error: %s", e)
+            raise
+
         return jsonify({"message": "Document deleted", "file_id": file_id}), 200
+    except QueryHardFailureError as e:
+        return jsonify({"error": e.message}), 400
     except Exception as e:
         logger.exception("delete: %s", e)
         return jsonify({"error": str(e)}), 500
