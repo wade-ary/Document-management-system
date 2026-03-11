@@ -18,6 +18,7 @@ from werkzeug.exceptions import HTTPException
 
 from backend.db import MongoDB
 from backend.storage import upload_file, delete_file_by_id
+from backend.ingest_errors import IngestHardFailureError
 from backend.search import rebuild_search_indexes
 from backend.retrieval import single_hop_retrieval
 from backend.precedent_finder import find_precedents
@@ -102,18 +103,22 @@ def api_ingest():
             if not f or not f.filename or not _allowed_file(f.filename):
                 results.append({"filename": getattr(f, "filename", ""), "error": "Invalid or disallowed file"})
                 continue
-            file_id, status_code = upload_file(
-                user_id=user_id,
-                file=f,
-                path=path,
-                account_type=account_type,
-                department=department,
-                access_to=access_to,
-                important=important,
-                uploaded_by=None,
-                deadline=deadline,
-                document_type=document_type,
-            )
+            try:
+                file_id, status_code = upload_file(
+                    user_id=user_id,
+                    file=f,
+                    path=path,
+                    account_type=account_type,
+                    department=department,
+                    access_to=access_to,
+                    important=important,
+                    uploaded_by=None,
+                    deadline=deadline,
+                    document_type=document_type,
+                )
+            except IngestHardFailureError as e:
+                results.append({"filename": f.filename, "error": e.message})
+                continue
             if file_id and status_code == 200:
                 metadata_collection.update_one(
                     {"file_id": file_id},

@@ -1,6 +1,10 @@
 """
 Storage: GridFS upload, metadata, and directory operations.
 Implements the ingestion pipeline: store in GridFS -> extract text -> save metadata -> update indexes.
+
+Failure handling:
+- Hard failures (file validation, DB write): raise IngestHardFailureError → API returns readable message.
+- Soft failures (text extraction, metadata generation, embedding/index): pipeline continues, doc marked for review, log TBD.
 """
 import logging
 import re
@@ -14,10 +18,23 @@ from backend.db import get_db, get_fs
 from backend.extract import extract_text_from_file
 from backend.search import add_document_to_indexes
 from backend.compliance_api import process_file_for_compliance
+from backend.ingest_errors import (
+    IngestHardFailureError,
+    MSG_FILE_CORRUPTED,
+    MSG_FILE_EMPTY,
+    MSG_FILE_EXISTS,
+    MSG_FILE_TOO_LARGE,
+    MSG_UNSUPPORTED_FORMAT,
+    MSG_DB_WRITE,
+)
 
 logger = logging.getLogger(__name__)
 
 DB_NAME = "EDUDATA"
+
+# File validation (hard failure)
+ALLOWED_EXTENSIONS = {"txt", "docx", "pdf", "md", "ppt", "pptx", "png", "jpg", "jpeg"}
+MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 def _get_fs():
@@ -52,47 +69,61 @@ def upload_file(
     """
     Ingestion pipeline: store file in GridFS, extract text, save metadata, add to search indexes.
     Returns (file_id, status_code). file_id is str (ObjectId string); status_code 200 on success.
+    Raises IngestHardFailureError on file validation or DB write failures (API returns readable message).
+    Soft failures (extraction, metadata gen, embedding/index) are logged for review and do not stop ingestion.
     """
+    # --- Hard failure: file validation ---
     if not file or not file.filename:
-        return None, 400
+        raise IngestHardFailureError(MSG_FILE_EMPTY)
+    filename = file.filename or "document"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        raise IngestHardFailureError(MSG_UNSUPPORTED_FORMAT)
     try:
         data = file.read()
         file.seek(0)
     except Exception as e:
         logger.warning("Failed to read upload file: %s", e)
-        return None, 500
+        raise IngestHardFailureError(MSG_FILE_CORRUPTED)
+    if not data or len(data) == 0:
+        raise IngestHardFailureError(MSG_FILE_EMPTY)
+    if len(data) > MAX_FILE_SIZE_BYTES:
+        raise IngestHardFailureError(MSG_FILE_TOO_LARGE)
+    path_norm = (path or "~/Sandbox").strip()
+    if _get_metadata_collection().find_one({"name": filename, "path": path_norm}):
+        raise IngestHardFailureError(MSG_FILE_EXISTS)
 
-    filename = file.filename or "document"
     content_type = file.content_type or ""
 
-    # 1. Store in GridFS
+    # --- Hard failure: DB write (GridFS) ---
     try:
         fs = _get_fs()
         grid_id = fs.put(data, filename=filename, content_type=content_type or None)
         file_id = str(grid_id)
     except Exception as e:
         logger.exception("GridFS put failed: %s", e)
-        return None, 500
+        raise IngestHardFailureError(MSG_DB_WRITE)
 
-    # 2. Extract text (PDF / TXT) — never block ingestion on failure
+    # --- Soft failure: text extraction (ingest continues, mark for review) ---
     extraction_failed = False
     try:
         extracted_text = extract_text_from_file(data, filename=filename, content_type=content_type)
         if not extracted_text or not str(extracted_text).strip():
-            ext = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
-            if ext in ("pdf", "txt") or (content_type and ("pdf" in content_type or "text" in content_type)):
+            ext_check = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+            if ext_check in ("pdf", "txt") or (content_type and ("pdf" in content_type or "text" in content_type)):
                 extraction_failed = True
             extracted_text = extracted_text or ""
     except Exception as e:
+        # TODO: send to review log (TBD) — soft fail: text extraction
         logger.warning("Text extraction failed (ingestion continues): %s", e)
         extracted_text = ""
         extraction_failed = True
 
-    # 3. Persist metadata
+    # Build metadata; soft-fail fields added below for metadata generation / index
     metadata = {
         "file_id": file_id,
         "name": filename,
-        "path": path or "~/Sandbox",
+        "path": path_norm,
         "user_id": user_id,
         "account_type": account_type or "Staff",
         "department": department or "",
@@ -107,6 +138,7 @@ def upload_file(
         metadata["ingestion_status"] = "incomplete"
         metadata["metadata_incomplete"] = True
         metadata["in_review_queue"] = True
+        metadata.setdefault("review_reasons", []).append("text_extraction_failed")
     if uploaded_by is not None:
         metadata["uploaded_by"] = uploaded_by
     if deadline is not None:
@@ -114,6 +146,7 @@ def upload_file(
     if document_type is not None:
         metadata["document_type"] = document_type
 
+    # --- Hard failure: DB write (metadata insert) ---
     try:
         _get_metadata_collection().insert_one(metadata)
     except Exception as e:
@@ -122,27 +155,32 @@ def upload_file(
             fs.delete(grid_id)
         except Exception:
             pass
-        return None, 500
+        raise IngestHardFailureError(MSG_DB_WRITE)
 
     # Send to dashboard review queue when extraction failed
     if extraction_failed:
         try:
             _get_review_queue_collection().insert_one({
                 "file_id": file_id,
-                "reason": "metadata_extraction_failed",
+                "reason": "text_extraction_failed",
                 "created_at": datetime.utcnow().isoformat(),
             })
         except Exception as e:
             logger.warning("Failed to add to review queue: %s", e)
 
-    # 4. Add to search indexes (FAISS, TF-IDF, BM25) — only when we have text
+    # --- Soft failure: index ingestion / embedding (ingest continues, mark for review) ---
     if extracted_text and extracted_text.strip():
         try:
             add_document_to_indexes(file_id, extracted_text)
         except Exception as e:
+            # TODO: send to review log (TBD) — soft fail: embedding / index ingestion
             logger.warning("Add to search indexes failed (document still saved): %s", e)
+            _get_metadata_collection().update_one(
+                {"file_id": file_id},
+                {"$addToSet": {"review_reasons": "index_ingestion_failed"}, "$set": {"ingestion_status": "incomplete", "in_review_queue": True}},
+            )
 
-        # 5. Run compliance analysis and persist structured metadata
+        # --- Soft failure: metadata generation (compliance) (ingest continues, mark for review) ---
         try:
             process_file_for_compliance(
                 file_id=file_id,
@@ -151,8 +189,12 @@ def upload_file(
                 user_id=user_id,
             )
         except Exception as e:
+            # TODO: send to review log (TBD) — soft fail: metadata generation
             logger.warning("Compliance processing failed (document still saved): %s", e)
-    # When extraction failed we never block: document is stored and marked for review.
+            _get_metadata_collection().update_one(
+                {"file_id": file_id},
+                {"$addToSet": {"review_reasons": "metadata_generation_failed"}, "$set": {"in_review_queue": True}},
+            )
 
     return file_id, 200
 
